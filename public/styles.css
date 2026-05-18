@@ -9,6 +9,7 @@
   --muted: #b9b3a4;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000; color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 #scene-root { position: fixed; inset: 0; }
