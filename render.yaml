@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: mosty
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+    healthCheckPath: /health
+    autoDeploy: true

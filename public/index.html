@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mosty — realtime quiz</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="logo">МОСТЫ</div>
+      <div class="hud">
+        <div class="hud-cell"><span class="lbl">Очки</span><span id="score">0</span></div>
+        <div class="hud-cell"><span class="lbl">Серия</span><span id="streak">0</span><span class="mult" id="mult">x1</span></div>
+        <div class="hud-cell"><span class="lbl">Жизни</span><span id="lives">♥♥♥</span></div>
+        <div class="hud-cell"><span class="lbl">Скорость</span><span id="speed">1.0x</span></div>
+      </div>
+      <button id="back-btn" class="ghost" hidden>← в песочницу</button>
+    </header>
+
+    <!-- Sandbox: select a mode -->
+    <section id="lobby" class="lobby">
+      <h1>Песочница</h1>
+      <p class="sub">Четыре варианта, как превратить «обрушивающиеся мосты» в квиз. У каждого свой источник давления.</p>
+
+      <div class="modes">
+        <button class="mode-card" data-mode="bridge">
+          <div class="mode-illu mode-illu-bridge"></div>
+          <h3>1. Обрушивающийся мост</h3>
+          <p>Прямой оммаж Sonic Adventure. Бежишь вперёд — плитки за тобой осыпаются. Перед развилкой нужно прыгнуть на одну из 4 плит с ответом до того, как обвал догонит. Ошибка — падение.</p>
+          <ul class="bullets">
+            <li>Давление: визуальное приближение обрыва</li>
+            <li>Ответственность: тело видно «на грани»</li>
+            <li>Дофамин: чем дольше серия, тем быстрее бежишь</li>
+          </ul>
+        </button>
+
+        <button class="mode-card" data-mode="ring">
+          <div class="mode-illu mode-illu-ring"></div>
+          <h3>2. Сжимающееся кольцо</h3>
+          <p>Вопрос в центре, 4 ответа по кругу. Кольцо сжимается к центру и «съедает» варианты по очереди — неважно, правильные или нет. Промедлил — нужного ответа уже нет.</p>
+          <ul class="bullets">
+            <li>Давление: видишь, как варианты исчезают</li>
+            <li>Адреналин: иногда правильный исчезает первым</li>
+            <li>Стратегия: рискнуть быстро или подождать</li>
+          </ul>
+        </button>
+
+        <button class="mode-card" data-mode="lanes">
+          <div class="mode-illu mode-illu-lanes"></div>
+          <h3>3. Четыре полосы</h3>
+          <p>Вид сверху, 4 параллельные дорожки. Ты на байке, впереди приближается линия ответа. Успей сменить полосу клавишами / свайпом / тапом до того, как пересечёшь её.</p>
+          <ul class="bullets">
+            <li>Давление: дистанция до линии тает</li>
+            <li>Моторика: переключение полос ощущается телом</li>
+            <li>Темп: каждая правильная — +ускорение</li>
+          </ul>
+        </button>
+
+        <button class="mode-card" data-mode="fuse">
+          <div class="mode-illu mode-illu-fuse"></div>
+          <h3>4. Горящий фитиль</h3>
+          <p>Вопрос написан на бумаге, по ней бежит огонь от ответов к фитилю. Каждый из 4 ответов сгорает по таймеру. Когда огонь дошёл до варианта — он недоступен.</p>
+          <ul class="bullets">
+            <li>Давление: огонь — самый «телесный» таймер</li>
+            <li>Ответственность: уничтоженный ответ не вернуть</li>
+            <li>Стиль: тёмная, тревожная подача</li>
+          </ul>
+        </button>
+      </div>
+
+      <div class="settings">
+        <label>Категория:
+          <select id="cat-select">
+            <option value="mix">Микс</option>
+            <option value="geo">География</option>
+            <option value="sci">Наука</option>
+            <option value="hist">История</option>
+            <option value="lang">Языки и слова</option>
+          </select>
+        </label>
+        <label>Сложность:
+          <select id="diff-select">
+            <option value="easy">Лёгкая</option>
+            <option value="normal" selected>Обычная</option>
+            <option value="hard">Жёсткая</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="sound-toggle" checked /> Звук
+        </label>
+      </div>
+    </section>
+
+    <!-- Game stage -->
+    <section id="stage" class="stage" hidden>
+      <div id="game-root"></div>
+      <div id="overlay" class="overlay" hidden>
+        <div class="card">
+          <h2 id="ov-title">Конец</h2>
+          <p id="ov-body"></p>
+          <div class="row">
+            <button id="ov-again" class="primary">Ещё раз</button>
+            <button id="ov-menu" class="ghost">В песочницу</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/questions.js"></script>
+  <script src="/sound.js"></script>
+  <script src="/modes/bridge.js"></script>
+  <script src="/modes/ring.js"></script>
+  <script src="/modes/lanes.js"></script>
+  <script src="/modes/fuse.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
