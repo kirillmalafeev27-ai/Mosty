@@ -49,7 +49,8 @@ const state = {
   jumping: false,
   launchSuccess: false,
   launchT: 0,
-  cameraYaw: 0,        // orbit angle around player (radians)
+  cameraYaw: 0,        // orbit angle around player, controlled by RMB drag
+  cameraPitch: 0.35,   // tilt up/down, controlled by RMB drag (Y)
   cameraDist: 11,
   cameraHeight: 5.5,
   upperT: Math.random() * Math.PI * 2,
@@ -345,7 +346,7 @@ function startRound() {
   });
 
   updateHud();
-  setHint('↑/↓ — идти. ←/→ — поворот камеры. Подойди вплотную к грибу, чтобы снять.');
+  setHint('↑↓ или WS — идти, ←→ или AD — стрейф, ПКМ + мышь — камера. Дойди до гриба.');
 }
 
 function updateHud() {
@@ -393,6 +394,33 @@ addEventListener('keydown', e => {
   if (e.key === ' ' || k === 'spacebar') { tryJump(); e.preventDefault(); }
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+// Right-mouse-button drag rotates the camera around the player.
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+let dragging = false, dragLastX = 0, dragLastY = 0;
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (e.button === 2) {
+    dragging = true;
+    dragLastX = e.clientX; dragLastY = e.clientY;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    renderer.domElement.style.cursor = 'grabbing';
+  }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - dragLastX;
+  const dy = e.clientY - dragLastY;
+  dragLastX = e.clientX; dragLastY = e.clientY;
+  state.cameraYaw -= dx * 0.005;
+  state.cameraPitch = THREE.MathUtils.clamp(state.cameraPitch + dy * 0.004, -0.15, 1.0);
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  if (e.button === 2 || dragging) {
+    dragging = false;
+    try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {}
+    renderer.domElement.style.cursor = '';
+  }
+});
 
 // -------- Jump --------
 function tryJump() {
@@ -507,22 +535,20 @@ function update(dt) {
   lowerBridge.rotation.z = -state.tilt;
 
   // === Player input → 2D movement on the bridge ===
-  let forward = 0, yawInput = 0;
+  // Forward/back: ↑/↓ or W/S. Strafe: ←/→ or A/D. Camera is rotated by RMB drag.
+  let forward = 0, strafe = 0;
   if (keys.has('arrowup') || keys.has('w')) forward += 1;
   if (keys.has('arrowdown') || keys.has('s')) forward -= 1;
-  if (keys.has('arrowleft')) yawInput += 1;   // arrows control camera
-  if (keys.has('arrowright')) yawInput -= 1;
-  if (keys.has('a')) yawInput += 1;            // A/D as alias
-  if (keys.has('d')) yawInput -= 1;
-  state.cameraYaw += yawInput * 1.8 * dt;
+  if (keys.has('arrowright') || keys.has('d')) strafe += 1;
+  if (keys.has('arrowleft') || keys.has('a')) strafe -= 1;
 
   if (state.onBridge && !state.jumping && (state.phase === 'choose' || state.phase === 'jump')) {
-    // Forward vector in world coords, from camera-yaw orientation
-    const fx = -Math.sin(state.cameraYaw);
-    const fz = -Math.cos(state.cameraYaw);
+    // Forward / right vectors in world coords, from current camera yaw.
+    const fx = -Math.sin(state.cameraYaw), fz = -Math.cos(state.cameraYaw);
+    const rx = Math.cos(state.cameraYaw),  rz = -Math.sin(state.cameraYaw);
     const walk = (state.phase === 'jump' ? 6.0 : 4.2);
-    state.playerVX += fx * forward * walk * dt * 5;
-    state.playerVZ += fz * forward * walk * dt * 5;
+    state.playerVX += (fx * forward + rx * strafe) * walk * dt * 5;
+    state.playerVZ += (fz * forward + rz * strafe) * walk * dt * 5;
     // Slide accel from the bridge tilt — only along X (the slope axis)
     // state.tilt > 0 → +X end down → player slides toward +X.
     const slideAccel = 9.8 * Math.sin(state.tilt) * 0.85;
@@ -639,10 +665,11 @@ function update(dt) {
   // Face the forward direction
   player.rotation.y = state.cameraYaw + Math.PI;
 
-  // === Camera orbit around player ===
-  const camTargetX = px + Math.sin(state.cameraYaw) * state.cameraDist;
-  const camTargetZ = pz + Math.cos(state.cameraYaw) * state.cameraDist;
-  const camTargetY = py + state.cameraHeight;
+  // === Camera orbit around player (yaw + pitch from RMB drag) ===
+  const flatDist = state.cameraDist * Math.cos(state.cameraPitch);
+  const camTargetX = px + Math.sin(state.cameraYaw) * flatDist;
+  const camTargetZ = pz + Math.cos(state.cameraYaw) * flatDist;
+  const camTargetY = py + state.cameraHeight + state.cameraDist * Math.sin(state.cameraPitch);
   camera.position.x += (camTargetX - camera.position.x) * Math.min(1, dt * 5);
   camera.position.y += (camTargetY - camera.position.y) * Math.min(1, dt * 5);
   camera.position.z += (camTargetZ - camera.position.z) * Math.min(1, dt * 5);
