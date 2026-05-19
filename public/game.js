@@ -34,6 +34,7 @@ const UPPER_X_FREQ = 0.65;    // radians / sec
 const JUMP_REACH = 3.4;       // max vertical clearance the jump covers
 const FAIL_TILT = 1.0;        // ~57°: past this player slides off regardless of position
 const STATIC_MU = 0.32;       // shoes-on-metal-ish; player won't slide if tan(tilt) < this
+const WALK_SPEED = 5.0;       // m/s — constant, same in every phase
 
 // -------- Game state --------
 const state = {
@@ -44,7 +45,8 @@ const state = {
   amplify: false,
   tilt: 0, tiltVel: 0,
   playerX: 0, playerZ: 0,
-  playerVX: 0, playerVZ: 0,
+  playerVX: 0, playerVZ: 0, // velocity used only during free fall
+  slideVX: 0,               // drift along X caused by bridge slope
   playerY: 0, playerVY: 0,
   onBridge: true,
   jumping: false,
@@ -320,6 +322,7 @@ function startRound() {
   state.tilt = 0; state.tiltVel = 0;
   state.playerX = 0; state.playerZ = 0;
   state.playerVX = 0; state.playerVZ = 0;
+  state.slideVX = 0;
   state.playerY = 0; state.playerVY = 0;
   state.onBridge = true; state.jumping = false;
   state.launchSuccess = false; state.launchT = 0;
@@ -549,35 +552,36 @@ function update(dt) {
   if (keys.has('arrowleft') || keys.has('a')) strafe -= 1;
 
   if (state.onBridge && !state.jumping && (state.phase === 'choose' || state.phase === 'jump')) {
-    // Forward / right vectors in world coords, from current camera yaw.
+    // Forward / right unit vectors from current camera yaw.
     const fx = -Math.sin(state.cameraYaw), fz = -Math.cos(state.cameraYaw);
     const rx = Math.cos(state.cameraYaw),  rz = -Math.sin(state.cameraYaw);
-    const walk = (state.phase === 'jump' ? 6.0 : 4.2);
-    state.playerVX += (fx * forward + rx * strafe) * walk * dt * 5;
-    state.playerVZ += (fz * forward + rz * strafe) * walk * dt * 5;
-    // Slope force / static friction model — feet grip until the slope gets steep enough.
-    // Sign convention: state.tilt > 0 → +X end down → slope force pulls player toward +X.
+    // Walking velocity is a CONSTANT in world space — same in every phase.
+    let walkVx = (fx * forward + rx * strafe) * WALK_SPEED;
+    let walkVz = (fz * forward + rz * strafe) * WALK_SPEED;
+    // Normalise diagonal so combined speed == WALK_SPEED, not WALK_SPEED * sqrt(2).
+    const mag = Math.hypot(walkVx, walkVz);
+    if (mag > WALK_SPEED) { walkVx = walkVx / mag * WALK_SPEED; walkVz = walkVz / mag * WALK_SPEED; }
+
+    // Slope drift along X (the slope axis). Static friction first.
     const gSin = 9.8 * Math.sin(state.tilt);
     const gCos = 9.8 * Math.cos(state.tilt);
-    const grip = STATIC_MU * gCos; // max slope force the shoes can resist
+    const grip = STATIC_MU * gCos;
     if (Math.abs(gSin) > grip) {
-      // Kinetic regime: the slope wins; resulting accel is the excess.
       const excess = (Math.abs(gSin) - grip) * Math.sign(gSin);
-      state.playerVX += excess * dt * 0.85;
+      state.slideVX += excess * dt;
     } else {
-      // Static regime: feet hold. Damp any residual velocity quickly.
-      state.playerVX *= Math.pow(0.2, dt * 8);
+      // Feet hold — drift bleeds off quickly.
+      state.slideVX *= Math.pow(0.05, dt * 8);
     }
-    // Walking friction on Z (no slope along Z) and gentle X damping
-    state.playerVX *= Math.pow(0.6, dt * 6);
-    state.playerVZ *= Math.pow(0.55, dt * 6);
-    state.playerX += state.playerVX * dt;
-    state.playerZ += state.playerVZ * dt;
-    // Clamp Z within bridge width so player can't walk off the side trivially
+
+    state.playerX += (walkVx + state.slideVX) * dt;
+    state.playerZ += walkVz * dt;
+
+    // Keep player within bridge width (Z) — invisible wall on the long edges.
     const halfW = LOWER_WID / 2 - 0.2;
-    if (state.playerZ > halfW) { state.playerZ = halfW; state.playerVZ = 0; }
-    if (state.playerZ < -halfW) { state.playerZ = -halfW; state.playerVZ = 0; }
-    // Auto-pickup if walked into a mushroom
+    if (state.playerZ > halfW) state.playerZ = halfW;
+    if (state.playerZ < -halfW) state.playerZ = -halfW;
+
     maybePickup();
   }
 
@@ -586,14 +590,17 @@ function update(dt) {
     if (Math.abs(state.playerX) > LOWER_LEN / 2 + 0.3) {
       state.onBridge = false;
       state.playerVY = 0.5;
-      state.playerVX = Math.sign(state.playerX) * 2.5;
+      // Carry over current slide momentum so the fall is continuous.
+      state.playerVX = state.slideVX + Math.sign(state.playerX) * 1.5;
+      state.playerVZ = 0;
       if (state.phase === 'choose' || state.phase === 'jump') {
         fail(state.amplify ? 'Снёс правильный — мост перевесило' : 'Перевесило');
       }
     } else if (Math.abs(state.tilt) > FAIL_TILT) {
       state.onBridge = false;
       state.playerVY = 0;
-      state.playerVX = Math.sign(state.tilt) * 3;
+      state.playerVX = state.slideVX + Math.sign(state.tilt) * 2;
+      state.playerVZ = 0;
       fail('Угол стал смертельным');
     }
   }
