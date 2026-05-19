@@ -439,16 +439,18 @@ renderer.domElement.addEventListener('pointerup', e => {
 // -------- Jump --------
 function tryJump() {
   if (state.phase !== 'jump' || state.jumping) return;
-  // Compute upper bridge surface height at the player's CURRENT XZ
   const upperY = upperSurfaceYAt(state.playerX, state.playerZ);
-  // Player's current world Y on top of (tilted) lower bridge
   const playerWorldY = lowerSurfaceYAt(state.playerX, state.playerZ) + PLAYER_HEIGHT;
   const gap = upperY - playerWorldY;
   const reachable = gap > 0 && gap < JUMP_REACH;
   state.jumping = true;
   state.launchT = 0;
   state.launchSuccess = reachable;
-  state.playerVY = Math.sqrt(2 * 18 * (reachable ? gap + 0.3 : 1.5)); // exact apex
+  // Need player CENTER to rise above (upper surface + PLAYER_HEIGHT) so the
+  // feet actually land on the bridge instead of clipping into it. Add a bit
+  // of headroom on top so the descent has time to trigger landing detection.
+  const apexAboveLaunch = reachable ? (gap + PLAYER_HEIGHT + 0.4) : 1.6;
+  state.playerVY = Math.sqrt(2 * 18 * apexAboveLaunch);
   Sound && Sound.rush && Sound.rush();
 }
 
@@ -613,17 +615,24 @@ function update(dt) {
     state.playerVY -= 18 * dt;
     state.playerY += state.playerVY * dt;
 
+    // Mild air control — player can nudge their trajectory while airborne.
+    const fx = -Math.sin(state.cameraYaw), fz = -Math.cos(state.cameraYaw);
+    const rx = Math.cos(state.cameraYaw),  rz = -Math.sin(state.cameraYaw);
+    const airBoost = WALK_SPEED * 0.45; // a little, not full ground speed
+    state.playerX += (fx * forward + rx * strafe) * airBoost * dt;
+    state.playerZ += (fz * forward + rz * strafe) * airBoost * dt;
+
     if (state.launchSuccess) {
-      // While in the air, also drift to follow the moving upper-bridge target X
-      // so the player visually arcs toward where it currently is.
+      // Drift player X toward where the upper bridge currently sits, so a
+      // moving upper bridge still receives the landing.
+      const towardUpperX = state.upperX + (state.playerX - state.upperX) * 0.35;
+      state.playerX += (towardUpperX - state.playerX) * Math.min(1, dt * 3.2);
+
       const targetUpY = upperSurfaceYAt(state.playerX, state.playerZ);
-      // Smoothly nudge player X toward upper bridge X projection (so the arc lands)
-      const desiredX = THREE.MathUtils.lerp(state.playerX, state.upperX + (state.playerX - state.upperX) * 0.6, dt * 1.6);
-      state.playerX = desiredX;
-      // Snap when player rises to the (current) upper bridge surface
       const playerWorldY = lowerSurfaceYAt(state.playerX, state.playerZ) + PLAYER_HEIGHT + state.playerY;
-      if (playerWorldY >= targetUpY + PLAYER_HEIGHT && state.playerVY <= 0) {
-        // Land on upper bridge — switch frame so we follow its ongoing motion
+      // Land when the player's feet are at or below the upper surface while descending.
+      const feet = playerWorldY - PLAYER_HEIGHT;
+      if (feet <= targetUpY + 0.05 && feet >= targetUpY - 0.6 && state.playerVY <= 0) {
         state.onBridge = false;
         state.onUpper = true;
         state.upperLocalX = state.playerX - state.upperX;
