@@ -23,7 +23,7 @@ const LOWER_LEN = 12;
 const LOWER_WID = 4.6;
 const SLOTS = [-4.0, -1.4, 1.4, 4.0]; // X positions of mushrooms
 const MUSHROOM_OFFSETS_Z = [-0.8, 0.8, -0.8, 0.8];
-const PLAYER_MASS = 1.6;      // heavier than a single mushroom (mass = 1)
+const PLAYER_MASS = 0.6;      // lighter than a mushroom (= 1) so 3 weights always out-pull the player
 const PICK_RADIUS = 1.05;     // walk within this distance (XZ) to grab
 const PLAYER_HEIGHT = 0.46;
 const UPPER_BASE_Y = 7.0;
@@ -32,7 +32,8 @@ const UPPER_X_AMP = 2.6;      // world units
 const UPPER_TILT_FREQ = 1.1;  // radians / sec
 const UPPER_X_FREQ = 0.65;    // radians / sec
 const JUMP_REACH = 3.4;       // max vertical clearance the jump covers
-const FAIL_TILT = 0.85;       // ~49°: past this player slides off
+const FAIL_TILT = 1.0;        // ~57°: past this player slides off regardless of position
+const STATIC_MU = 0.32;       // shoes-on-metal-ish; player won't slide if tan(tilt) < this
 
 // -------- Game state --------
 const state = {
@@ -531,7 +532,7 @@ function update(dt) {
   if (state.onBridge && !state.jumping) {
     imbalance += state.playerX * PLAYER_MASS;
   }
-  const K_GRAV = 0.30;
+  const K_GRAV = 0.18;
   const K_SPRING = 1.4; // mild restoring force (bridge ropes)
   const C_DAMP = 1.8;
   const torque = imbalance * K_GRAV - state.tilt * K_SPRING - state.tiltVel * C_DAMP;
@@ -554,12 +555,21 @@ function update(dt) {
     const walk = (state.phase === 'jump' ? 6.0 : 4.2);
     state.playerVX += (fx * forward + rx * strafe) * walk * dt * 5;
     state.playerVZ += (fz * forward + rz * strafe) * walk * dt * 5;
-    // Slide accel from the bridge tilt — only along X (the slope axis)
-    // state.tilt > 0 → +X end down → player slides toward +X.
-    const slideAccel = 9.8 * Math.sin(state.tilt) * 0.85;
-    state.playerVX += slideAccel * dt;
-    // Friction
-    state.playerVX *= Math.pow(0.55, dt * 6);
+    // Slope force / static friction model — feet grip until the slope gets steep enough.
+    // Sign convention: state.tilt > 0 → +X end down → slope force pulls player toward +X.
+    const gSin = 9.8 * Math.sin(state.tilt);
+    const gCos = 9.8 * Math.cos(state.tilt);
+    const grip = STATIC_MU * gCos; // max slope force the shoes can resist
+    if (Math.abs(gSin) > grip) {
+      // Kinetic regime: the slope wins; resulting accel is the excess.
+      const excess = (Math.abs(gSin) - grip) * Math.sign(gSin);
+      state.playerVX += excess * dt * 0.85;
+    } else {
+      // Static regime: feet hold. Damp any residual velocity quickly.
+      state.playerVX *= Math.pow(0.2, dt * 8);
+    }
+    // Walking friction on Z (no slope along Z) and gentle X damping
+    state.playerVX *= Math.pow(0.6, dt * 6);
     state.playerVZ *= Math.pow(0.55, dt * 6);
     state.playerX += state.playerVX * dt;
     state.playerZ += state.playerVZ * dt;
