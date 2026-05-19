@@ -32,9 +32,14 @@ const UPPER_X_AMP = 2.6;      // world units
 const UPPER_TILT_FREQ = 1.1;  // radians / sec
 const UPPER_X_FREQ = 0.65;    // radians / sec
 const JUMP_REACH = 3.4;       // max vertical clearance the jump covers
-const FAIL_TILT = 1.0;        // ~57°: past this player slides off regardless of position
+const FAIL_TILT = 1.3;        // ~74°: only kicks in if the bridge truly flips
 const STATIC_MU = 0.32;       // shoes-on-metal-ish; player won't slide if tan(tilt) < this
 const WALK_SPEED = 5.0;       // m/s — constant, same in every phase
+// Bridge spring-damper tuning. omega_n = sqrt(K_SPRING) ≈ 3.16 rad/s → ~1s settle.
+// Equilibrium tilt = imbalance * K_GRAV / K_SPRING = imbalance * 0.16.
+const K_GRAV = 1.6;
+const K_SPRING = 10.0;
+const C_DAMP = 2.5;           // damping ratio ≈ 0.4 → slight overshoot for a punchy feel
 
 // -------- Game state --------
 const state = {
@@ -535,9 +540,6 @@ function update(dt) {
   if (state.onBridge && !state.jumping) {
     imbalance += state.playerX * PLAYER_MASS;
   }
-  const K_GRAV = 0.18;
-  const K_SPRING = 1.4; // mild restoring force (bridge ropes)
-  const C_DAMP = 1.8;
   const torque = imbalance * K_GRAV - state.tilt * K_SPRING - state.tiltVel * C_DAMP;
   state.tiltVel += torque * dt;
   state.tilt += state.tiltVel * dt;
