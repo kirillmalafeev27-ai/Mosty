@@ -391,8 +391,13 @@ addEventListener('keydown', e => {
   if (state.phase === 'idle') return;
   const k = e.key.toLowerCase();
   keys.add(k);
-  if (e.key === ' ' || k === 'spacebar') { tryJump(); e.preventDefault(); }
-});
+  if (e.key === ' ' || k === 'spacebar') {
+    // Some browsers activate the last-focused button on space; drop focus first.
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    tryJump();
+    e.preventDefault();
+  }
+}, { capture: true });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
 // Right-mouse-button drag rotates the camera around the player.
@@ -694,13 +699,15 @@ function update(dt) {
 }
 
 // -------- Boot --------
-$('start').addEventListener('click', () => {
+$('start').addEventListener('click', e => {
+  e.currentTarget.blur();
   Sound && Sound.set && Sound.set(true);
   boot.hidden = true;
   started = true;
   startRound();
 });
-$('ov-restart').addEventListener('click', () => {
+$('ov-restart').addEventListener('click', e => {
+  e.currentTarget.blur();
   state.score = 0; state.round = 1;
   startRound();
 });
