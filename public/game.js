@@ -16,7 +16,7 @@ const roundEl = $('round'), scoreEl = $('score'), streakEl = $('streak');
 const questionEl = $('question'), hintEl = $('hint');
 const tiltNeedle = $('tilt-needle'), phaseNeedle = $('phase-needle');
 const overlay = $('overlay'), ovTitle = $('ov-title'), ovBody = $('ov-body');
-const boot = $('boot');
+const boot = $('boot'), touchControls = $('touch-controls');
 if (roundEl.previousElementSibling) roundEl.previousElementSibling.textContent = 'Мост';
 
 // -------- Tunables --------
@@ -165,12 +165,18 @@ const root = $('scene-root');
 let renderer = null;
 let rendererError = null;
 
+function rendererPixelRatio() {
+  const touchFirst = matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 760;
+  const cap = touchFirst ? 1.5 : 2;
+  return Math.min(window.devicePixelRatio || 1, cap);
+}
+
 function initRenderer() {
   if (renderer) return true;
   rendererError = null;
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(rendererPixelRatio());
     renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -934,7 +940,10 @@ initCoopUi();
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  if (renderer) renderer.setSize(innerWidth, innerHeight);
+  if (renderer) {
+    renderer.setPixelRatio(rendererPixelRatio());
+    renderer.setSize(innerWidth, innerHeight);
+  }
 });
 
 addEventListener('pagehide', () => {
@@ -1382,6 +1391,11 @@ function updateFloorMarkers(completedCurrent = false) {
 function setHint(text) { hintEl.textContent = text; }
 
 function bridgeControlsHint(bridge) {
+  if (touchInputPreferred()) {
+    return canUseMovingJump(bridge)
+      ? 'На этом мосту держи направление и жми «Прыг» для короткого прыжка. Без направления «Прыг» работает как прыжок вверх после очистки.'
+      : 'Кнопка «Прыг» нужна только для прыжка вверх после очистки. Камеру крути свайпом по свободной части экрана.';
+  }
   return canUseMovingJump(bridge)
     ? 'На этом мосту движение + пробел = короткий прыжок, пробел без движения = прыжок вверх после очистки.'
     : 'На этом мосту пробел нужен только для прыжка вверх после очистки.';
@@ -1474,6 +1488,36 @@ function bridgeReadyToJump(bridge) {
 
 // -------- Input --------
 const keys = new Set();
+const virtualKeys = new Set();
+
+function touchInputPreferred() {
+  return matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 760;
+}
+
+function setVirtualKey(key, pressed) {
+  const normalized = String(key || '').toLowerCase();
+  if (!normalized) return;
+  if (pressed) {
+    virtualKeys.add(normalized);
+    keys.add(normalized);
+  } else {
+    virtualKeys.delete(normalized);
+    keys.delete(normalized);
+  }
+}
+
+function clearVirtualKeys() {
+  for (const key of virtualKeys) keys.delete(key);
+  virtualKeys.clear();
+  document.querySelectorAll('.touch-btn.active, .touch-jump.active')
+    .forEach(btn => btn.classList.remove('active'));
+}
+
+function requestPlayerJump() {
+  if (state.phase === 'idle') return;
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  if (!tryGapJump()) tryJump();
+}
 
 function movementInput() {
   let forward = 0, strafe = 0;
@@ -1499,42 +1543,99 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys.add(k);
   if (e.key === ' ' || k === 'spacebar') {
-    // Some browsers activate the last-focused button on space; drop focus first.
-    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    if (!tryGapJump()) tryJump();
+    requestPlayerJump();
     e.preventDefault();
   }
 }, { capture: true });
-addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('keyup', e => {
+  const key = e.key.toLowerCase();
+  if (!virtualKeys.has(key)) keys.delete(key);
+});
+addEventListener('blur', clearVirtualKeys);
 
-// Right-mouse-button drag rotates the camera around the player.
+function bindTouchControls() {
+  if (!touchControls || touchControls.dataset.bound) return;
+  touchControls.dataset.bound = '1';
+
+  for (const btn of touchControls.querySelectorAll('[data-key]')) {
+    const key = btn.dataset.key;
+    const press = (e) => {
+      e.preventDefault();
+      btn.classList.add('active');
+      setVirtualKey(key, true);
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    };
+    const release = (e) => {
+      e.preventDefault();
+      btn.classList.remove('active');
+      setVirtualKey(key, false);
+      try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    btn.addEventListener('pointerdown', press, { passive: false });
+    btn.addEventListener('pointerup', release, { passive: false });
+    btn.addEventListener('pointercancel', release, { passive: false });
+    btn.addEventListener('lostpointercapture', () => {
+      btn.classList.remove('active');
+      setVirtualKey(key, false);
+    });
+  }
+
+  const jumpBtn = $('touch-jump');
+  if (jumpBtn) {
+    const releaseJump = () => jumpBtn.classList.remove('active');
+    jumpBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      jumpBtn.classList.add('active');
+      requestPlayerJump();
+      try { jumpBtn.setPointerCapture(e.pointerId); } catch (_) {}
+    }, { passive: false });
+    jumpBtn.addEventListener('pointerup', (e) => {
+      e.preventDefault();
+      releaseJump();
+      try { jumpBtn.releasePointerCapture(e.pointerId); } catch (_) {}
+    }, { passive: false });
+    jumpBtn.addEventListener('pointercancel', releaseJump);
+    jumpBtn.addEventListener('lostpointercapture', releaseJump);
+  }
+}
+bindTouchControls();
+
+// Right-mouse-button drag rotates the camera on desktop; one-finger drag does it on touch screens.
 let dragging = false, dragLastX = 0, dragLastY = 0;
 function bindRendererInput() {
   if (!renderer || renderer.domElement.dataset.inputBound) return;
   renderer.domElement.dataset.inputBound = '1';
   renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
   renderer.domElement.addEventListener('pointerdown', e => {
-    if (e.button === 2) {
+    const touchCamera = e.pointerType === 'touch' && touchInputPreferred();
+    if (e.button === 2 || touchCamera) {
+      e.preventDefault();
       dragging = true;
       dragLastX = e.clientX; dragLastY = e.clientY;
       renderer.domElement.setPointerCapture(e.pointerId);
       renderer.domElement.style.cursor = 'grabbing';
     }
-  });
+  }, { passive: false });
   renderer.domElement.addEventListener('pointermove', e => {
     if (!dragging) return;
+    e.preventDefault();
     const dx = e.clientX - dragLastX;
     const dy = e.clientY - dragLastY;
     dragLastX = e.clientX; dragLastY = e.clientY;
     state.cameraYaw -= dx * 0.005;
     state.cameraPitch = THREE.MathUtils.clamp(state.cameraPitch + dy * 0.004, -0.15, 1.0);
-  });
+  }, { passive: false });
   renderer.domElement.addEventListener('pointerup', e => {
     if (e.button === 2 || dragging) {
       dragging = false;
       try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {}
       renderer.domElement.style.cursor = '';
     }
+  });
+  renderer.domElement.addEventListener('pointercancel', e => {
+    dragging = false;
+    try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {}
+    renderer.domElement.style.cursor = '';
   });
 }
 
@@ -2143,6 +2244,21 @@ function update(dt) {
 }
 
 // -------- Boot --------
+let bootStartBusy = false;
+
+function setBootStartBusy(button, busy) {
+  if (!button) return;
+  if (!button.dataset.readyText) button.dataset.readyText = button.textContent;
+  button.disabled = busy;
+  button.classList.toggle('loading', busy);
+  button.textContent = busy ? 'AI грузит...' : button.dataset.readyText;
+}
+
+async function prepareQuizForStart() {
+  if (typeof window.prepareMostyQuiz !== 'function') return;
+  await window.prepareMostyQuiz({ floors: VISIBLE_BRIDGES, startFloor: 1 });
+}
+
 function showRendererError() {
   boot.hidden = true;
   ovTitle.textContent = 'WebGL не запустился';
@@ -2152,16 +2268,30 @@ function showRendererError() {
   overlay.hidden = false;
 }
 
-$('start').addEventListener('click', e => {
-  e.currentTarget.blur();
+$('start').addEventListener('click', async e => {
+  if (bootStartBusy) return;
+  const button = e.currentTarget;
+  button.blur();
   if (!renderer && !initRenderer()) {
     showRendererError();
     return;
   }
-  Sound && Sound.set && Sound.set(true);
-  boot.hidden = true;
-  started = true;
-  startRound();
+  bootStartBusy = true;
+  setBootStartBusy(button, true);
+  try {
+    await prepareQuizForStart();
+    Sound && Sound.set && Sound.set(true);
+    boot.hidden = true;
+    started = true;
+    startRound();
+  } catch (error) {
+    console.warn('Mosty quiz prepare failed:', error);
+    const status = document.getElementById('learning-status');
+    if (status) status.textContent = 'AI не загрузился. Нажми «Начать» еще раз.';
+  } finally {
+    bootStartBusy = false;
+    setBootStartBusy(button, false);
+  }
 });
 $('ov-restart').addEventListener('click', e => {
   e.currentTarget.blur();

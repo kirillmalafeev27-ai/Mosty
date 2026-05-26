@@ -215,8 +215,10 @@
       this.generatedPools = Object.create(null);
       this.fetching = Object.create(null);
       this.usedDisplays = Object.create(null);
+      this.generationAllowed = false;
+      this.preparing = false;
       this.status = { generationConfigured: false, ttsConfigured: false, checked: false };
-      this.checkStatus();
+      this.statusPromise = this.checkStatus();
     }
 
     configure(next) {
@@ -240,7 +242,6 @@
         this.status = { checked: true, generationConfigured: false, ttsConfigured: false };
       }
       this.renderSettingsMenu();
-      this.prefetch();
     }
 
     pickQuestion(cat = 'mix', context = {}) {
@@ -252,20 +253,58 @@
     pickGrammarQuestion(context) {
       const slot = this.slotForBridge(context.floor || 0);
       const generated = this.takeFromPool(this.slotKey(slot), slot);
-      this.ensurePool(slot);
+      if (this.generationAllowed) this.ensurePool(slot);
       return generated || this.fallbackQuestion(slot);
     }
 
     pickAudioQuestion() {
       const key = this.audioKey();
       const generated = this.takeAudioFromPool(key);
-      this.ensureAudioPool();
+      if (this.generationAllowed) this.ensureAudioPool();
       return generated || this.fallbackAudioQuestion();
     }
 
     prefetch() {
+      if (!this.generationAllowed) return Promise.resolve([]);
       if (this.settings.mode === 'audio') this.ensureAudioPool();
       if (this.settings.mode === 'grammar') this.ensurePool(this.slotForBridge(0));
+    }
+
+    async prepareForGame(options = {}) {
+      await this.statusPromise;
+      this.generationAllowed = true;
+      if (this.settings.mode === 'classic' || !this.status.generationConfigured) {
+        this.renderSettingsMenu();
+        return { ok: true, generated: false };
+      }
+
+      const floors = Math.max(1, Math.min(20, Number(options.floors) || 8));
+      const startFloor = Math.max(1, Number(options.startFloor) || 1);
+      this.preparing = true;
+      this.renderSettingsMenu();
+      try {
+        if (this.settings.mode === 'audio') {
+          const pool = await this.ensureAudioPool(floors, floors);
+          if ((pool?.length || 0) < floors) throw new Error('AI audio questions are not ready');
+        } else {
+          const needs = new Map();
+          for (let i = 0; i < floors; i++) {
+            const slot = this.slotForBridge(startFloor + i);
+            const key = this.slotKey(slot);
+            const current = needs.get(key) || { slot, count: 0 };
+            current.count += 1;
+            needs.set(key, current);
+          }
+          await Promise.all([...needs.entries()].map(async ([key, { slot, count }]) => {
+            const pool = await this.ensurePool(slot, count, count);
+            if ((pool?.length || 0) < count) throw new Error(`AI questions are not ready for ${key}`);
+          }));
+        }
+        return { ok: true, generated: true };
+      } finally {
+        this.preparing = false;
+        this.renderSettingsMenu();
+      }
     }
 
     slotForBridge(floor) {
@@ -303,12 +342,13 @@
       return this.formatAudioQuestion(raw, true, key);
     }
 
-    ensurePool(slot) {
+    ensurePool(slot, minCount = 1, requestCount = 10) {
       if (!this.status.generationConfigured) return Promise.resolve([]);
       const key = this.slotKey(slot);
-      if (this.generatedPools[key]?.length) return Promise.resolve(this.generatedPools[key]);
+      if ((this.generatedPools[key]?.length || 0) >= minCount) return Promise.resolve(this.generatedPools[key]);
       if (this.fetching[key]) return this.fetching[key];
       const seen = Array.from(this.usedDisplays[key] || []).slice(-12);
+      const count = Math.max(1, Math.min(20, Number(requestCount) || 10));
       this.fetching[key] = fetch('/api/generate-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -317,7 +357,7 @@
           lexicalTopic: this.settings.lexicalTopic,
           grammarTopic: slot.grammarTopic,
           isWortstellung: slot.isWortstellung,
-          count: 10,
+          count,
           exclude: seen,
         }),
       })
@@ -339,19 +379,20 @@
       return this.fetching[key];
     }
 
-    ensureAudioPool() {
+    ensureAudioPool(minCount = 1, requestCount = 10) {
       if (!this.status.generationConfigured) return Promise.resolve([]);
       const key = this.audioKey();
-      if (this.generatedPools[key]?.length) return Promise.resolve(this.generatedPools[key]);
+      if ((this.generatedPools[key]?.length || 0) >= minCount) return Promise.resolve(this.generatedPools[key]);
       if (this.fetching[key]) return this.fetching[key];
       const seen = Array.from(this.usedDisplays[key] || []).slice(-12);
+      const count = Math.max(1, Math.min(20, Number(requestCount) || 10));
       this.fetching[key] = fetch('/api/generate-audio-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           level: this.settings.level,
           lexicalTopic: this.settings.lexicalTopic,
-          count: 10,
+          count,
           exclude: seen,
         }),
       })
@@ -431,11 +472,13 @@
     renderSettingsMenu() {
       const root = document.getElementById('learning-menu');
       if (!root) return;
-      const fetchingNow = Object.keys(this.fetching).length > 0;
+      const fetchingNow = this.preparing || Object.keys(this.fetching).length > 0;
       const statusKind = this.status.generationConfigured
         ? (fetchingNow ? 'loading' : 'online')
         : 'fallback';
-      const statusText = statusKind === 'loading'
+      const statusText = this.preparing
+        ? 'AI готовит стартовые вопросы'
+        : statusKind === 'loading'
         ? 'AI подгружает вопросы'
         : statusKind === 'online'
           ? 'AI подключен'
@@ -521,27 +564,23 @@
       const modeButton = event.target.closest('[data-mode]');
       if (modeButton) {
         bank.configure({ mode: modeButton.dataset.mode });
-        bank.prefetch();
         return;
       }
       const levelButton = event.target.closest('[data-level]');
       if (levelButton) {
         bank.configure({ level: levelButton.dataset.level });
-        bank.prefetch();
       }
     });
 
     menu.addEventListener('change', (event) => {
       if (event.target.id === 'learning-lexical') {
         bank.configure({ lexicalTopic: event.target.value });
-        bank.prefetch();
         return;
       }
       if (event.target.matches('[data-slot-index]')) {
         const slots = bank.settings.grammarSlots.slice();
         slots[Number(event.target.dataset.slotIndex)] = event.target.value;
         bank.configure({ grammarSlots: slots });
-        bank.prefetch();
       }
     });
 
@@ -618,6 +657,7 @@
   window.MOSTY_LEARNING = { LANGUAGE_LEVELS, LEXICAL_TOPICS, GRAMMAR_TOPICS, bank };
   window.QuizQuestionBank = bank;
   window.pickQuestion = (cat, context) => bank.pickQuestion(cat, context);
+  window.prepareMostyQuiz = (options) => bank.prepareForGame(options);
   window.playQuizAudio = (question, force) => AudioQuiz.play(question, force);
 
   document.addEventListener('DOMContentLoaded', () => {

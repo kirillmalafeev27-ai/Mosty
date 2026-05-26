@@ -37,6 +37,16 @@
 
   <div id="hint" class="hint">↑/↓ или W/S — идти. ←/→ или A/D — стрейф. ПКМ + мышь — камера. Дойди до гриба, чтобы снять. ПРОБЕЛ — прыжок.</div>
 
+  <div id="touch-controls" class="touch-controls" aria-label="Mobile controls">
+    <div class="touch-pad" aria-label="Movement">
+      <button class="touch-btn touch-up" type="button" data-key="arrowup" aria-label="Forward">&#9650;</button>
+      <button class="touch-btn touch-left" type="button" data-key="arrowleft" aria-label="Left">&#9664;</button>
+      <button class="touch-btn touch-right" type="button" data-key="arrowright" aria-label="Right">&#9654;</button>
+      <button class="touch-btn touch-down" type="button" data-key="arrowdown" aria-label="Back">&#9660;</button>
+    </div>
+    <button id="touch-jump" class="touch-jump" type="button" aria-label="Jump">Прыг</button>
+  </div>
+
   <div id="overlay" class="overlay" hidden>
     <div class="card">
       <h2 id="ov-title"></h2>
