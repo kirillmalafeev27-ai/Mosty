@@ -93,7 +93,7 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 #audio-repeat.on { display: block; }
 #audio-repeat.loading { opacity: 0.55; }
 
-.touch-controls { position: fixed; left: calc(14px + env(safe-area-inset-left)); right: calc(14px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 8; display: none; align-items: end; justify-content: space-between; pointer-events: none; }
+.touch-controls { position: fixed; left: calc(28px + env(safe-area-inset-left)); right: calc(14px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 8; display: none; align-items: end; justify-content: space-between; pointer-events: none; }
 .touch-pad { position: relative; width: 154px; height: 112px; pointer-events: auto; touch-action: none; }
 .touch-btn, .touch-jump { border: 1px solid rgba(255,255,255,0.18); background: rgba(8, 13, 16, 0.64); color: #f7c85a; box-shadow: 0 8px 24px rgba(0,0,0,0.24); backdrop-filter: blur(10px); font: inherit; font-weight: 900; cursor: pointer; user-select: none; touch-action: none; }
 .touch-btn { position: absolute; width: 48px; height: 48px; border-radius: 12px; font-size: 17px; line-height: 1; }

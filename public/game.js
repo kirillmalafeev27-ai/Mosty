@@ -400,9 +400,59 @@ function ensureBridge(floor) {
   let bridge = bridges.find(item => item.floor === floor);
   if (!bridge) {
     bridge = createBridge(floor);
-    if (started) setupBridgeQuestion(bridge);
+    if (started) {
+      // Question bridges (sequence/pairs/anti/...) build their own questions
+      // locally and never touch the AI pool, so they can be set up immediately.
+      // For the rest, when the AI pool is empty we pause the game and trigger
+      // a fresh generation; the bridge is marked and finished once new
+      // questions arrive.
+      if (bridgeUsesAiPool(bridge) && !window.quizPoolHasQuestion?.({ floor: bridge.floor, type: bridge.type })) {
+        bridge.pendingSetup = true;
+        triggerAiPause(bridge);
+      } else {
+        setupBridgeQuestion(bridge);
+      }
+    }
   }
   return bridge;
+}
+
+// Sequence and pairs bridges build their question locally; everything else
+// (including multiCorrect/anti/memory) pulls one item from the AI pool.
+const SELF_CONTAINED_BRIDGE_TYPES = new Set(['sequence', 'pairs']);
+function bridgeUsesAiPool(bridge) {
+  if (typeof window.quizPoolHasQuestion !== 'function') return false;
+  return !SELF_CONTAINED_BRIDGE_TYPES.has(bridge.type);
+}
+
+let aiPauseActive = false;
+function triggerAiPause(bridge) {
+  if (aiPauseActive) return;
+  aiPauseActive = true;
+  state.pausedPhase = state.phase === 'paused' ? 'choose' : state.phase;
+  state.phase = 'paused';
+  questionEl.textContent = 'Пул заданий исчерпан. AI готовит новые вопросы — подожди…';
+  setHint('Пул заданий исчерпан. AI генерирует новые вопросы — подожди…');
+  const ensure = window.quizEnsureQuestionAvailable
+    ? window.quizEnsureQuestionAvailable({ floor: bridge.floor, type: bridge.type })
+    : Promise.resolve();
+  Promise.resolve(ensure)
+    .catch(err => console.warn('AI generation failed:', err))
+    .finally(() => {
+      for (const b of bridges) {
+        if (b.pendingSetup) {
+          setupBridgeQuestion(b);
+          b.pendingSetup = false;
+        }
+      }
+      aiPauseActive = false;
+      if (state.phase === 'paused') {
+        state.phase = state.pausedPhase || 'choose';
+        syncQuestionHud();
+        setHint(`Новые задания подготовлены. ${bridgeControlsHint(activeBridge())}`);
+      }
+      state.pausedPhase = null;
+    });
 }
 
 function pruneOldBridges() {
@@ -1255,6 +1305,13 @@ function bridgeConfigFromBridge(bridge) {
 }
 
 function setupBridgeQuestion(bridge) {
+  // Questions the player never finished should go back into the AI pool so the
+  // same exercise reappears next attempt. Correctly cleared bridges (scored)
+  // stay consumed.
+  if (bridge.question && !bridge.scored && typeof window.releaseQuizQuestion === 'function') {
+    window.releaseQuizQuestion(bridge.question);
+  }
+  bridge.question = null;
   for (const w of bridge.weights) bridge.group.remove(w.mesh);
   bridge.weights = [];
   clearBridgeDecor(bridge);
@@ -1559,18 +1616,28 @@ function bindTouchControls() {
 
   for (const btn of touchControls.querySelectorAll('[data-key]')) {
     const key = btn.dataset.key;
+    // iOS Safari delays pointerdown near the left screen edge while it decides
+    // whether the touch is a swipe-back gesture. Listening to touchstart with
+    // preventDefault cancels the gesture and triggers the key immediately.
     const press = (e) => {
       e.preventDefault();
       btn.classList.add('active');
       setVirtualKey(key, true);
-      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      if (e.pointerId !== undefined) {
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      }
     };
     const release = (e) => {
       e.preventDefault();
       btn.classList.remove('active');
       setVirtualKey(key, false);
-      try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (e.pointerId !== undefined) {
+        try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
     };
+    btn.addEventListener('touchstart', press, { passive: false });
+    btn.addEventListener('touchend', release, { passive: false });
+    btn.addEventListener('touchcancel', release, { passive: false });
     btn.addEventListener('pointerdown', press, { passive: false });
     btn.addEventListener('pointerup', release, { passive: false });
     btn.addEventListener('pointercancel', release, { passive: false });
@@ -1792,7 +1859,9 @@ function landOnNextBridge(landingLocalX) {
   pruneOldBridges();
   updateHud();
   updateFloorMarkers();
-  setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
+  if (state.phase !== 'paused') {
+    setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
+  }
 }
 
 // -------- Render loop --------
@@ -1940,6 +2009,7 @@ function updateBridgeHazards(bridge, dt, moveIntent) {
 }
 
 function update(dt) {
+  if (state.phase === 'paused') return;
   state.upperT += dt;
   state.pickupGrace = Math.max(0, state.pickupGrace - dt);
   const currentBridge = activeBridge();
