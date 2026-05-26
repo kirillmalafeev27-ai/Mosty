@@ -461,29 +461,70 @@ const floorMarkers = [];
 // -------- Mushroom answer weights --------
 function labelTexture(text) {
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
+  c.width = 1024; c.height = 512;
   const ctx = c.getContext('2d');
   ctx.fillStyle = 'rgba(0,0,0,0.72)';
-  roundRect(ctx, 6, 6, c.width - 12, c.height - 12, 22); ctx.fill();
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.fill();
   ctx.strokeStyle = '#f4b942'; ctx.lineWidth = 4;
-  roundRect(ctx, 6, 6, c.width - 12, c.height - 12, 22); ctx.stroke();
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.stroke();
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  let size = 56;
-  ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
-  while (ctx.measureText(text).width > c.width - 60 && size > 22) {
-    size -= 4;
+  const maxWidth = c.width - 96;
+  const fontFamily = 'ui-sans-serif, system-ui, sans-serif';
+  let size = 82;
+  let lines = [];
+  while (size >= 34) {
+    ctx.font = `bold ${size}px ${fontFamily}`;
+    lines = wrapLabelText(ctx, text, maxWidth, 3);
+    if (lines.length <= 3 && lines.every(line => ctx.measureText(line).width <= maxWidth)) break;
     ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
+    size -= 4;
   }
-  if (ctx.measureText(text).width > c.width - 60) {
-    const words = text.split(' ');
-    const half = Math.ceil(words.length / 2);
-    ctx.fillText(words.slice(0, half).join(' '), c.width / 2, c.height / 2 - size * 0.55);
-    ctx.fillText(words.slice(half).join(' '), c.width / 2, c.height / 2 + size * 0.55);
-  } else {
-    ctx.fillText(text, c.width / 2, c.height / 2);
-  }
+
+  if (!lines.length) lines = [String(text || '')];
+  ctx.font = `bold ${size}px ${fontFamily}`;
+  const lineHeight = size * 1.12;
+  const startY = c.height / 2 - (lines.length - 1) * lineHeight / 2;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, c.width / 2, startY + i * lineHeight);
+  });
   return new THREE.CanvasTexture(c);
+}
+function wrapLabelText(ctx, text, maxWidth, maxLines) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [''];
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      line = test;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = word;
+    if (ctx.measureText(line).width > maxWidth) {
+      line = fitSingleWord(ctx, line, maxWidth);
+    }
+    if (lines.length >= maxLines - 1) break;
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  const usedWords = lines.join(' ').split(/\s+/).filter(Boolean).length;
+  if (usedWords < words.length && lines.length) {
+    let tail = `${lines[lines.length - 1]}...`;
+    while (ctx.measureText(tail).width > maxWidth && tail.length > 4) {
+      tail = `${tail.slice(0, -4)}...`;
+    }
+    lines[lines.length - 1] = tail;
+  }
+  return lines;
+}
+function fitSingleWord(ctx, word, maxWidth) {
+  let fitted = String(word || '');
+  while (ctx.measureText(fitted).width > maxWidth && fitted.length > 4) {
+    fitted = `${fitted.slice(0, -4)}...`;
+  }
+  return fitted;
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -520,8 +561,8 @@ function makeMushroom(text, n) {
   g.add(star);
   const tex = labelTexture(`${n}. ${text}`);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false }));
-  sprite.position.y = 1.55;
-  sprite.scale.set(2.6, 1.3, 1);
+  sprite.position.y = 1.78;
+  sprite.scale.set(3.7, 1.85, 1);
   sprite.renderOrder = 999;
   g.add(sprite);
   return g;
@@ -776,7 +817,7 @@ function shuffle(items) {
 
 function makeQuestionForBridge(bridge) {
   if (!isQuestionBridge(bridge)) {
-    const question = window.pickQuestion('mix');
+    const question = window.pickQuestion('mix', { floor: bridge.floor, type: bridge.type });
     question.correctSet = new Set([question.correctIndex]);
     return question;
   }
@@ -808,7 +849,7 @@ function makeQuestionForBridge(bridge) {
     };
   }
 
-  const question = window.pickQuestion('mix');
+  const question = window.pickQuestion('mix', { floor: bridge.floor, type: bridge.type });
   const correctSet = new Set([question.correctIndex]);
 
   if (bridge.type === 'multiCorrect') {
@@ -904,6 +945,7 @@ function syncQuestionHud() {
   state.amplify = bridge.amplify;
   const label = BRIDGE_TYPE_LABELS[bridge.type] || bridge.type;
   questionEl.textContent = `Мост ${state.round}: ${label} [${bridge.category === 'question' ? 'задание' : 'препятствие'}]. ${bridge.question.q}`;
+  if (window.playQuizAudio) window.playQuizAudio(bridge.question);
 }
 
 function startRound() {

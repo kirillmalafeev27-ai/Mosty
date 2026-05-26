@@ -43,10 +43,27 @@ canvas { display: block; }
 .boot { position: fixed; inset: 0; z-index: 20; background: radial-gradient(ellipse at center, #1a1308, #050203 75%); display: flex; align-items: center; justify-content: center; text-align: center; }
 .boot h1 { font-size: 48px; letter-spacing: 0.16em; margin: 0 0 8px; color: var(--acc); }
 .boot p { color: var(--muted); margin: 0 0 18px; }
+.learning-menu { width: min(760px, 92vw); margin: 0 auto 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,0.28); display: grid; gap: 10px; text-align: left; }
+.learning-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.learning-row button, .learning-select select, .slot-grid select { background: rgba(255,255,255,0.08); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 12px; }
+.learning-row button { cursor: pointer; font-weight: 800; }
+.learning-row button.selected { background: var(--acc); color: #1a1304; border-color: transparent; }
+.learning-select { color: var(--muted); font-size: 12px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
+.learning-select select, .slot-grid select { width: 100%; }
+.slot-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.slot-grid label { color: var(--muted); font-size: 11px; display: grid; gap: 4px; }
+.learning-status { color: var(--muted); font-size: 12px; text-align: center; min-height: 16px; }
+.learning-menu.classic .learning-select, .learning-menu.classic .slot-grid { display: none; }
+.learning-menu.audio .slot-grid { display: none; }
+#audio-repeat { position: fixed; right: 16px; top: 84px; z-index: 6; display: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--acc); font-weight: 900; cursor: pointer; backdrop-filter: blur(6px); }
+#audio-repeat.on { display: block; }
+#audio-repeat.loading { opacity: 0.55; }
 
 @media (max-width: 720px) {
   .question { font-size: 14px; max-width: 90vw; }
   .hud-bottom { flex-direction: column; gap: 8px; }
   .meter { min-width: 60vw; }
   .hint { font-size: 11px; bottom: 200px; }
+  .slot-grid { grid-template-columns: 1fr; max-height: 120px; overflow-y: auto; }
+  .learning-menu { padding: 10px; }
 }
