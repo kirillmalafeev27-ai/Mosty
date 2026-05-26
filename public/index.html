@@ -56,5 +56,32 @@
   <script src="/questions.js"></script>
   <script src="/sound.js"></script>
   <script type="module" src="/game.js"></script>
+  <script>
+    (function () {
+      window.addEventListener('error', function (event) {
+        window.MOSTY_BOOT_ERROR = event && (event.message || String(event.error || ''));
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        window.MOSTY_BOOT_ERROR = event && event.reason && (event.reason.message || String(event.reason));
+      });
+      document.addEventListener('DOMContentLoaded', function () {
+        var start = document.getElementById('start');
+        if (!start) return;
+        start.addEventListener('click', function () {
+          setTimeout(function () {
+            if (window.MOSTY_GAME_READY) return;
+            var boot = document.getElementById('boot');
+            var overlay = document.getElementById('overlay');
+            var title = document.getElementById('ov-title');
+            var body = document.getElementById('ov-body');
+            if (boot) boot.hidden = true;
+            if (title) title.textContent = 'Игра не загрузилась';
+            if (body) body.textContent = 'Не загрузился 3D-модуль. Проверь, что на Render установились npm-зависимости и /vendor/three.module.js отдает 200.';
+            if (overlay) overlay.hidden = false;
+          }, 0);
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -561,8 +561,8 @@ function makeMushroom(text, n) {
   g.add(star);
   const tex = labelTexture(`${n}. ${text}`);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false }));
-  sprite.position.y = 1.78;
-  sprite.scale.set(3.7, 1.85, 1);
+  sprite.position.y = 1.7;
+  sprite.scale.set(3.18, 1.62, 1);
   sprite.renderOrder = 999;
   g.add(sprite);
   return g;
@@ -1779,3 +1779,5 @@ $('ov-restart').addEventListener('click', e => {
   state.score = 0; state.round = 1; state.streak = 0;
   startRound();
 });
+
+window.MOSTY_GAME_READY = true;

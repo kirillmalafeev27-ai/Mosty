@@ -432,15 +432,24 @@
       const root = document.getElementById('learning-menu');
       if (!root) return;
       const fetchingNow = Object.keys(this.fetching).length > 0;
-      const statusText = this.status.generationConfigured
-        ? (fetchingNow ? 'AI-генерация: подгружаю вопросы...' : 'AI-генерация готова')
-        : 'AI-ключ не настроен: игра использует fallback-вопросы';
+      const statusKind = this.status.generationConfigured
+        ? (fetchingNow ? 'loading' : 'online')
+        : 'fallback';
+      const statusText = statusKind === 'loading'
+        ? 'AI подгружает вопросы'
+        : statusKind === 'online'
+          ? 'AI подключен'
+          : 'Fallback вопросы';
 
       root.querySelectorAll('[data-mode]').forEach((button) => {
-        button.classList.toggle('selected', button.dataset.mode === this.settings.mode);
+        const selected = button.dataset.mode === this.settings.mode;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
       });
       root.querySelectorAll('[data-level]').forEach((button) => {
-        button.classList.toggle('selected', button.dataset.level === this.settings.level);
+        const selected = button.dataset.level === this.settings.level;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
       });
       const lexical = root.querySelector('#learning-lexical');
       if (lexical) lexical.value = this.settings.lexicalTopic;
@@ -449,6 +458,7 @@
       });
       const status = root.querySelector('#learning-status');
       if (status) status.textContent = statusText;
+      root.dataset.status = statusKind;
       root.classList.toggle('classic', this.settings.mode === 'classic');
       root.classList.toggle('audio', this.settings.mode === 'audio');
     }
@@ -463,29 +473,47 @@
     menu.id = 'learning-menu';
     menu.className = 'learning-menu';
     menu.innerHTML = `
-      <div class="learning-row mode-row">
-        <button type="button" data-mode="grammar">Грамматика</button>
-        <button type="button" data-mode="audio">Аудио</button>
-        <button type="button" data-mode="classic">Классика</button>
+      <div class="learning-head">
+        <div>
+          <div class="learning-kicker">Квиз</div>
+          <div class="learning-title">Настройка раунда</div>
+        </div>
+        <div id="learning-status" class="learning-status"></div>
       </div>
-      <div class="learning-row level-row">
-        ${LANGUAGE_LEVELS.map((level) => `<button type="button" data-level="${level}">${level}</button>`).join('')}
+      <div class="learning-controls">
+        <section class="control-block">
+          <div class="control-label">Режим</div>
+          <div class="segmented mode-row">
+            <button type="button" data-mode="grammar">Грамматика</button>
+            <button type="button" data-mode="audio">Аудио</button>
+            <button type="button" data-mode="classic">Классика</button>
+          </div>
+        </section>
+        <section class="control-block">
+          <div class="control-label">Уровень</div>
+          <div class="segmented level-row">
+            ${LANGUAGE_LEVELS.map((level) => `<button type="button" data-level="${level}">${level}</button>`).join('')}
+          </div>
+        </section>
       </div>
-      <label class="learning-select">Лексика
-        <select id="learning-lexical">
-          ${LEXICAL_TOPICS.map((topic) => `<option value="${topic}">${topic}</option>`).join('')}
-        </select>
-      </label>
-      <div class="slot-grid">
-        ${DEFAULT_SLOTS.map((slot, index) => `
-          <label>Слот ${index + 1}
-            <select data-slot-index="${index}">
-              ${GRAMMAR_TOPICS.map((topic) => `<option value="${topic}"${topic === slot ? ' selected' : ''}>${topic}</option>`).join('')}
-            </select>
-          </label>
-        `).join('')}
+      <div class="learning-form">
+        <label class="field learning-select">
+          <span>Лексика</span>
+          <select id="learning-lexical">
+            ${LEXICAL_TOPICS.map((topic) => `<option value="${topic}">${topic}</option>`).join('')}
+          </select>
+        </label>
+        <div class="slot-grid" aria-label="Темы мостов">
+          ${DEFAULT_SLOTS.map((slot, index) => `
+            <label class="field">
+              <span>Мост ${index + 1}</span>
+              <select data-slot-index="${index}">
+                ${GRAMMAR_TOPICS.map((topic) => `<option value="${topic}"${topic === slot ? ' selected' : ''}>${topic}</option>`).join('')}
+              </select>
+            </label>
+          `).join('')}
+        </div>
       </div>
-      <div id="learning-status" class="learning-status"></div>
     `;
     panel.insertBefore(menu, document.getElementById('start'));
 
