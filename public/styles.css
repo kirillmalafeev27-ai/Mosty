@@ -69,7 +69,21 @@ canvas { display: block; }
 .field select { width: 100%; min-height: 42px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.075); color: var(--text); padding: 0 36px 0 12px; font: inherit; font-size: 13px; outline: none; transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease; }
 .field select:hover { border-color: rgba(255,255,255,0.22); background: rgba(255,255,255,0.1); }
 .field select:focus { border-color: rgba(143,216,198,0.72); box-shadow: 0 0 0 3px rgba(143,216,198,0.14); }
+.field select, .field select option { color-scheme: dark; }
+.field select option { background: #111418; color: #f1efe7; }
 .slot-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.coop-panel { grid-column: 1; align-self: start; display: grid; gap: 10px; margin-top: 12px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.coop-title { color: #f1efe7; font-size: 13px; font-weight: 850; }
+.coop-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.coop-row input { min-width: 0; height: 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.075); color: var(--text); padding: 0 12px; font: inherit; font-size: 13px; outline: none; }
+.coop-row input:focus { border-color: rgba(143,216,198,0.72); box-shadow: 0 0 0 3px rgba(143,216,198,0.14); }
+.coop-row button { height: 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.08); color: #f1efe7; padding: 0 12px; font: inherit; font-size: 12px; font-weight: 850; cursor: pointer; }
+.coop-row button:hover { background: rgba(255,255,255,0.13); }
+.coop-status { min-height: 18px; color: #9da7b5; font-size: 12px; line-height: 1.35; }
+.coop-status.on { color: #8fd8c6; }
+.coop-status.warn { color: #f7c85a; }
+.coop-badge { position: fixed; top: 84px; left: 12px; z-index: 6; display: none; max-width: min(330px, 86vw); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(143,216,198,0.26); background: rgba(6, 12, 14, 0.72); color: #c9f8ed; font-size: 12px; font-weight: 760; backdrop-filter: blur(8px); }
+.coop-badge.on { display: block; }
 .learning-menu.classic .learning-select, .learning-menu.classic .slot-grid { display: none; }
 .learning-menu.audio .slot-grid { display: none; }
 #audio-repeat { position: fixed; right: 16px; top: 84px; z-index: 6; display: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--acc); font-weight: 900; cursor: pointer; backdrop-filter: blur(6px); }
@@ -86,6 +100,9 @@ canvas { display: block; }
   .boot h1 { font-size: 42px; }
   .boot p { font-size: 13px; max-width: none; }
   .boot #start { width: 100%; margin-top: 0; }
+  .coop-panel { grid-column: auto; margin-top: 0; }
+  .coop-row { grid-template-columns: 1fr; }
+  .coop-row button { width: 100%; }
   .learning-menu { grid-column: auto; grid-row: auto; gap: 14px; }
   .learning-head { align-items: stretch; flex-direction: column; gap: 10px; }
   .learning-title { font-size: 20px; }

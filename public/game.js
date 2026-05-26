@@ -137,6 +137,7 @@ const state = {
   playerVX: 0, playerVZ: 0, // velocity used only during free fall
   slideVX: 0,               // drift along X caused by bridge slope
   playerY: 0, playerVY: 0,
+  worldX: 0, worldY: 0, worldZ: 0,
   jumpStartX: 0, jumpStartZ: 0, jumpWorldX: 0, jumpWorldZ: 0, jumpBaseY: 0,
   jumpMode: 'none',
   jumpLocalVX: 0,
@@ -596,6 +597,339 @@ pupL.position.set(0.16, 0.65, 0.42); player.add(pupL);
 const pupR = pupL.clone(); pupR.position.x = -0.10; player.add(pupR);
 scene.add(player);
 
+// -------- Online coop --------
+function playerLabelTexture(text, color = '#5ce58a') {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 96;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(6, 12, 14, 0.82)';
+  roundRect(ctx, 8, 10, c.width - 16, c.height - 20, 18);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 5;
+  roundRect(ctx, 8, 10, c.width - 16, c.height - 20, 18);
+  ctx.stroke();
+  ctx.fillStyle = '#f7fbff';
+  ctx.font = '800 42px ui-sans-serif, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, c.width / 2, c.height / 2 + 2);
+  return new THREE.CanvasTexture(c);
+}
+
+function makeRemotePlayer(color = 0x5ce58a, label = 'P2') {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(PLAYER_HEIGHT * 1.05, 22, 16),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.12, emissive: color, emissiveIntensity: 0.08 })
+  );
+  body.castShadow = true;
+  body.position.y = PLAYER_HEIGHT;
+  body.userData.kind = 'body';
+  g.add(body);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.52, 0.045, 8, 34),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45, emissive: color, emissiveIntensity: 0.18 })
+  );
+  ring.position.y = 0.15;
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.035, 1.0, 8),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5 })
+  );
+  beacon.position.y = 1.22;
+  g.add(beacon);
+  const labelSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: playerLabelTexture(label, `#${new THREE.Color(color).getHexString()}`),
+    depthTest: false,
+    depthWrite: false,
+  }));
+  labelSprite.position.y = 1.86;
+  labelSprite.scale.set(1.35, 0.5, 1);
+  labelSprite.renderOrder = 1000;
+  labelSprite.userData.kind = 'label';
+  g.add(labelSprite);
+  g.userData.label = label;
+  return g;
+}
+
+const Coop = {
+  enabled: false,
+  room: '',
+  playerId: '',
+  seat: 1,
+  color: '#3aa0ff',
+  players: new Map(),
+  configs: new Map(),
+  meshes: new Map(),
+  eventSource: null,
+  lastSend: 0,
+  statusEl: null,
+  badgeEl: null,
+
+  get isHost() { return this.seat === 1; },
+
+  async join(roomCodeValue = '') {
+    const response = await fetch('/api/coop/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: roomCodeValue }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    this.enabled = true;
+    this.room = data.room;
+    this.playerId = data.playerId;
+    this.seat = data.seat;
+    this.color = data.color;
+    playerBody.material.color.set(data.color);
+    this.applyRoomState(data.state);
+    this.openEvents();
+    this.updateUi(`Комната ${this.room}. Игрок ${this.seat}. Второй может открыть ?room=${this.room}`, 'on');
+    this.updateBadge();
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set('room', this.room);
+      history.replaceState(null, '', url);
+    } catch (_) {}
+  },
+
+  openEvents() {
+    if (this.eventSource) this.eventSource.close();
+    this.eventSource = new EventSource(`/api/coop/events?room=${encodeURIComponent(this.room)}&player=${encodeURIComponent(this.playerId)}`);
+    this.eventSource.addEventListener('room', (event) => this.applyRoomState(JSON.parse(event.data || '{}')));
+    this.eventSource.addEventListener('state', (event) => this.applyRoomState(JSON.parse(event.data || '{}')));
+    this.eventSource.addEventListener('config', (event) => {
+      const payload = JSON.parse(event.data || '{}');
+      if (payload.floor && payload.config) this.applyConfig(payload.floor, payload.config);
+    });
+    this.eventSource.onerror = () => {
+      this.updateUi(`Комната ${this.room}: переподключаюсь...`, 'warn');
+    };
+  },
+
+  applyRoomState(roomState = {}) {
+    if (roomState.configs) {
+      Object.entries(roomState.configs).forEach(([floor, config]) => this.applyConfig(floor, config));
+    }
+    const nextPlayers = new Map();
+    for (const playerInfo of roomState.players || []) {
+      if (!playerInfo || playerInfo.id === this.playerId) continue;
+      applyRemoteBridgeProgress(playerInfo.state);
+      nextPlayers.set(playerInfo.id, playerInfo);
+    }
+    this.players = nextPlayers;
+    this.updateRemoteMeshes();
+    this.updateBadge();
+  },
+
+  applyConfig(floor, config) {
+    const key = String(floor);
+    if (!config || this.configs.has(key)) return;
+    this.configs.set(key, config);
+    const bridge = bridges.find(item => String(item.floor) === key);
+    if (started && bridge && !bridge.scored) {
+      setupBridgeQuestion(bridge);
+      if (bridge === activeBridge()) syncQuestionHud();
+    }
+  },
+
+  configForFloor(floor) {
+    return this.enabled ? this.configs.get(String(floor)) : null;
+  },
+
+  publishBridgeConfig(bridge) {
+    if (!this.enabled || this.configs.has(String(bridge.floor))) return;
+    const key = String(bridge.floor);
+    const config = bridgeConfigFromBridge(bridge);
+    this.configs.set(key, config);
+    fetch('/api/coop/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: this.room, playerId: this.playerId, floor: bridge.floor, config }),
+    })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (!data?.config || JSON.stringify(data.config) === JSON.stringify(config)) return;
+        this.configs.delete(key);
+        this.applyConfig(key, data.config);
+      })
+      .catch(() => {});
+  },
+
+  bridgeLoads(floor) {
+    const loads = [];
+    for (const playerInfo of this.players.values()) {
+      const s = playerInfo.state;
+      if (!s || s.phase === 'over' || s.floor !== floor || !s.onBridge || s.jumping) continue;
+      if (!Number.isFinite(s.playerX)) continue;
+      loads.push({ id: playerInfo.id, x: s.playerX, mass: PLAYER_MASS });
+    }
+    return loads;
+  },
+
+  tick(dt) {
+    if (!this.enabled || !started) return;
+    this.lastSend += dt;
+    if (this.lastSend < 0.08) return;
+    this.lastSend = 0;
+    const payload = {
+      floor: state.round,
+      phase: state.phase,
+      playerX: state.playerX,
+      playerZ: state.playerZ,
+      playerY: state.playerY,
+      worldX: state.worldX,
+      worldY: state.worldY,
+      worldZ: state.worldZ,
+      onBridge: state.onBridge,
+      onUpper: state.onUpper,
+      jumping: state.jumping,
+      jumpMode: state.jumpMode,
+      tilt: state.tilt,
+      score: state.score,
+      streak: state.streak,
+      bridges: bridges.map(bridge => ({
+        floor: bridge.floor,
+        removed: bridge.weights.filter(w => w.removed).map(w => w.idx),
+        checked: bridge.weights.filter(w => w.anchor && w.checked).map(w => w.idx),
+        amplify: bridge.amplify,
+        done: bridge.done,
+      })),
+      t: performance.now(),
+    };
+    fetch('/api/coop/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: this.room, playerId: this.playerId, state: payload }),
+    }).catch(() => {});
+  },
+
+  updateRemoteMeshes() {
+    if (!this.enabled || !started) return;
+    const alive = new Set();
+    for (const playerInfo of this.players.values()) {
+      const s = playerInfo.state;
+      if (!s) continue;
+      alive.add(playerInfo.id);
+      let mesh = this.meshes.get(playerInfo.id);
+      if (!mesh) {
+        const label = `P${playerInfo.seat || 2}`;
+        mesh = makeRemotePlayer(new THREE.Color(playerInfo.color || '#5ce58a').getHex(), label);
+        scene.add(mesh);
+        this.meshes.set(playerInfo.id, mesh);
+      }
+      const pos = remoteWorldPosition(s);
+      mesh.position.set(pos.x, pos.y, pos.z);
+      mesh.rotation.z = s.floor === state.round ? -activeBridge().tilt * 0.5 : 0;
+      mesh.visible = true;
+    }
+    for (const [id, mesh] of this.meshes) {
+      if (!alive.has(id)) mesh.visible = false;
+    }
+  },
+
+  updateUi(text, variant = '') {
+    if (!this.statusEl) return;
+    this.statusEl.textContent = text;
+    this.statusEl.className = `coop-status ${variant}`.trim();
+  },
+
+  updateBadge() {
+    if (!this.badgeEl) return;
+    if (!this.enabled) {
+      this.badgeEl.classList.remove('on');
+      return;
+    }
+    const peers = this.players.size;
+    this.badgeEl.textContent = `Кооп ${this.room}: ты игрок ${this.seat}, рядом ${peers}`;
+    this.badgeEl.classList.add('on');
+  },
+};
+
+function remoteWorldPosition(remoteState) {
+  if (Number.isFinite(remoteState.worldX) && Number.isFinite(remoteState.worldY) && Number.isFinite(remoteState.worldZ)) {
+    return { x: remoteState.worldX, y: remoteState.worldY, z: remoteState.worldZ };
+  }
+  const bridge = ensureBridge(remoteState.floor || state.round);
+  const x = Number(remoteState.playerX) || 0;
+  const z = Number(remoteState.playerZ) || 0;
+  return {
+    x: bridgeWorldXFromLocal(bridge, x),
+    y: bridgeSurfaceYAt(bridge, x, z) + PLAYER_HEIGHT + (Number(remoteState.playerY) || 0),
+    z,
+  };
+}
+
+function applyRemoteBridgeProgress(remoteState) {
+  if (!started || !remoteState || !Array.isArray(remoteState.bridges)) return;
+  for (const bridgeState of remoteState.bridges) {
+    const floor = Number(bridgeState.floor);
+    if (!Number.isFinite(floor)) continue;
+    const bridge = ensureBridge(floor);
+    const removed = new Set(bridgeState.removed || []);
+    const checked = new Set(bridgeState.checked || []);
+    let changed = false;
+    for (const w of bridge.weights) {
+      if (checked.has(w.idx)) w.checked = true;
+      if (!removed.has(w.idx) || w.removed) continue;
+      w.removed = true;
+      w.fallVy = 0;
+      if (w.isCorrect) bridge.amplify = true;
+      changed = true;
+    }
+    if (bridgeState.amplify) bridge.amplify = true;
+    if (bridgeState.done) bridge.done = true;
+    if (changed && bridge === activeBridge()) {
+      state.amplify = bridge.amplify;
+      if (state.phase === 'choose' && bridgeReadyToJump(bridge)) {
+        state.phase = 'jump';
+        setHint('Партнер очистил мост. Встань на поднятый край и прыгай наверх.');
+      }
+    }
+  }
+}
+
+function initCoopUi() {
+  const panel = boot && boot.firstElementChild;
+  const startBtn = $('start');
+  if (!panel || !startBtn || $('coop-panel')) return;
+  const el = document.createElement('div');
+  el.id = 'coop-panel';
+  el.className = 'coop-panel';
+  const initialRoom = new URLSearchParams(location.search).get('room') || '';
+  el.innerHTML = `
+    <div class="coop-title">Сетевая игра</div>
+    <div class="coop-row">
+      <input id="coop-room" maxlength="8" autocomplete="off" placeholder="Код комнаты" value="${initialRoom.replace(/"/g, '')}">
+      <button type="button" id="coop-create">Создать</button>
+      <button type="button" id="coop-join">Войти</button>
+    </div>
+    <div id="coop-status" class="coop-status">Можно играть одному или подключить второго игрока по коду комнаты.</div>
+  `;
+  panel.insertBefore(el, startBtn);
+  const badge = document.createElement('div');
+  badge.id = 'coop-badge';
+  badge.className = 'coop-badge';
+  document.body.appendChild(badge);
+  Coop.statusEl = $('coop-status');
+  Coop.badgeEl = badge;
+  const input = $('coop-room');
+  const connect = async (room) => {
+    try {
+      Coop.updateUi('Подключаю комнату...', 'warn');
+      await Coop.join(room);
+    } catch (err) {
+      Coop.updateUi(`Не удалось подключиться: ${err.message || err}`, 'warn');
+    }
+  };
+  $('coop-create').addEventListener('click', () => connect(''));
+  $('coop-join').addEventListener('click', () => connect(input.value));
+  if (initialRoom) connect(initialRoom);
+}
+initCoopUi();
+
 // -------- Resize --------
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -736,8 +1070,9 @@ function makeBridgeVisuallyNarrow(bridge, halfWidth) {
   }
 }
 
-function applyBridgeVariant(bridge) {
+function applyBridgeVariant(bridge, config = null) {
   const parts = bridge.group.userData;
+  const variant = config?.variant || {};
   bridge.category = isQuestionBridge(bridge) ? 'question' : 'physical';
   bridge.mode = 'default';
   bridge.biasTorque = 0;
@@ -758,16 +1093,18 @@ function applyBridgeVariant(bridge) {
   bridge.landingGrace = 0;
 
   if (bridge.type === 'missingOne') {
-    for (const index of randomDeckSectionIndices(parts, 1)) removeDeckSection(bridge, index);
+    const indices = variant.missingSectionIndices || randomDeckSectionIndices(parts, 1);
+    for (const index of indices) removeDeckSection(bridge, index);
   } else if (bridge.type === 'missingTwoPairs') {
-    for (const index of randomDeckSectionIndices(parts, 2)) removeDeckSection(bridge, index);
+    const indices = variant.missingSectionIndices || randomDeckSectionIndices(parts, 2);
+    for (const index of indices) removeDeckSection(bridge, index);
   } else if (bridge.type === 'wind') {
     bridge.noRails = true;
-    bridge.windDir = Math.random() < 0.5 ? -1 : 1;
+    bridge.windDir = variant.windDir || (Math.random() < 0.5 ? -1 : 1);
     for (const part of [...parts.rails, ...parts.posts, ...parts.sideBoards]) part.visible = false;
     addDeckZone(bridge, 0, bridge.windDir * (LOWER_WID / 2 + 0.25), LOWER_LEN, 0.3, zoneMaterials.wind, 0.55);
   } else if (bridge.type === 'biased') {
-    bridge.biasTorque = (Math.random() < 0.5 ? -1 : 1) * 1.2;
+    bridge.biasTorque = Number.isFinite(variant.biasTorque) ? variant.biasTorque : (Math.random() < 0.5 ? -1 : 1) * 1.2;
     const side = Math.sign(bridge.biasTorque);
     const crate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), zoneMaterials.bias);
     crate.position.set(side * 4.7, 0.6, -1.45);
@@ -775,7 +1112,7 @@ function applyBridgeVariant(bridge) {
     bridge.group.add(crate);
     bridge.decor.push(crate);
   } else if (bridge.type === 'ice') {
-    bridge.iceT = Math.random() * Math.PI * 2;
+    bridge.iceT = Number.isFinite(variant.iceT) ? variant.iceT : Math.random() * Math.PI * 2;
     bridge.iceBand = { centerZ: 0, halfWidth: ICE_HALF_WIDTH, zMin: -ICE_HALF_WIDTH, zMax: ICE_HALF_WIDTH };
     bridge.iceZone = addDeckZone(bridge, 0, 0, LOWER_LEN - 0.9, ICE_HALF_WIDTH * 2, zoneMaterials.ice, 0.38);
   } else if (bridge.type === 'narrow') {
@@ -866,13 +1203,56 @@ function makeQuestionForBridge(bridge) {
   return question;
 }
 
+function serializableQuestion(question) {
+  return {
+    ...question,
+    correctSet: question.correctSet ? [...question.correctSet] : null,
+  };
+}
+
+function restoreQuestion(question) {
+  if (!question) return null;
+  return {
+    ...question,
+    correctSet: Array.isArray(question.correctSet) ? new Set(question.correctSet) : question.correctSet,
+  };
+}
+
+function bridgeVariantConfig(bridge) {
+  return {
+    missingSectionIndices: [...(bridge.missingSectionIndices || [])],
+    windDir: bridge.windDir,
+    biasTorque: bridge.biasTorque,
+    iceT: bridge.iceT,
+  };
+}
+
+function bridgeConfigFromBridge(bridge) {
+  return {
+    floor: bridge.floor,
+    type: bridge.type,
+    variant: bridgeVariantConfig(bridge),
+    question: serializableQuestion(bridge.question),
+    weights: bridge.weights.map(w => ({
+      slot: w.slot,
+      zOff: w.zOff,
+      idx: w.idx,
+      text: w.text,
+      isCorrect: w.isCorrect,
+      mass: w.mass,
+      anchor: w.anchor,
+    })),
+  };
+}
+
 function setupBridgeQuestion(bridge) {
   for (const w of bridge.weights) bridge.group.remove(w.mesh);
   bridge.weights = [];
   clearBridgeDecor(bridge);
-  bridge.type = bridgeTypeFor(bridge.floor);
-  applyBridgeVariant(bridge);
-  bridge.question = makeQuestionForBridge(bridge);
+  const coopConfig = Coop?.configForFloor?.(bridge.floor) || null;
+  bridge.type = coopConfig?.type || bridgeTypeFor(bridge.floor);
+  applyBridgeVariant(bridge, coopConfig);
+  bridge.question = restoreQuestion(coopConfig?.question) || makeQuestionForBridge(bridge);
   bridge.amplify = false;
   bridge.done = false;
   bridge.scored = false;
@@ -885,8 +1265,9 @@ function setupBridgeQuestion(bridge) {
   bridge.group.position.set(bridge.lockedX, bridge.baseY, 0);
   bridge.group.rotation.set(0, 0, 0);
 
-  let slots = [...SLOTS];
-  let zOffsets = [...MUSHROOM_OFFSETS_Z];
+  const configuredWeights = Array.isArray(coopConfig?.weights) ? coopConfig.weights : null;
+  let slots = configuredWeights ? configuredWeights.map(w => w.slot) : [...SLOTS];
+  let zOffsets = configuredWeights ? configuredWeights.map(w => w.zOff || 0) : [...MUSHROOM_OFFSETS_Z];
   if (bridge.type === 'missingOne') {
     slots = missingBridgeSlots(bridge);
     zOffsets = [0, 0, 0, 0];
@@ -898,14 +1279,18 @@ function setupBridgeQuestion(bridge) {
     zOffsets = [0, 0, 0, 0];
   }
 
-  const anchorIndex = bridge.type === 'anchor' ? Math.floor(Math.random() * bridge.question.choices.length) : -1;
+  const anchorIndex = configuredWeights
+    ? configuredWeights.findIndex(w => w.anchor)
+    : bridge.type === 'anchor' ? Math.floor(Math.random() * bridge.question.choices.length) : -1;
   bridge.sequenceOrder = bridge.question.sequence || [];
 
   bridge.question.choices.forEach((text, i) => {
-    const mass = bridge.type === 'variedMass'
+    const configured = configuredWeights?.[i] || null;
+    const mass = configured?.mass || (bridge.type === 'variedMass'
       ? [0.5, 1, 2, 1][i]
-      : 1;
-    const m = makeMushroom(text, i + 1);
+      : 1);
+    const labelText = configured?.text || text;
+    const m = makeMushroom(labelText, i + 1);
     if (bridge.type === 'variedMass') m.scale.setScalar(mass === 2 ? 1.35 : mass === 0.5 ? 0.75 : 1);
     m.position.set(slots[i], 0.35, zOffsets[i]);
     if (i === anchorIndex) {
@@ -922,11 +1307,11 @@ function setupBridgeQuestion(bridge) {
       mesh: m,
       slot: slots[i],
       zOff: zOffsets[i],
-      idx: i,
-      text,
-      isCorrect: bridge.question.correctSet ? bridge.question.correctSet.has(i) : i === bridge.question.correctIndex,
+      idx: configured?.idx ?? i,
+      text: labelText,
+      isCorrect: configured?.isCorrect ?? (bridge.question.correctSet ? bridge.question.correctSet.has(i) : i === bridge.question.correctIndex),
       mass,
-      anchor: i === anchorIndex,
+      anchor: configured?.anchor ?? i === anchorIndex,
       checked: false,
       removed: false,
       fallVy: 0,
@@ -936,6 +1321,7 @@ function setupBridgeQuestion(bridge) {
     .filter(w => !w.isCorrect)
     .sort((a, b) => (a.mass || 1) - (b.mass || 1))
     .map(w => w.idx);
+  if (!coopConfig) Coop?.publishBridgeConfig?.(bridge);
 }
 
 function syncQuestionHud() {
@@ -1353,6 +1739,9 @@ function updateBridgePhysics(bridge, dt, isActive) {
     state.playerLoadX = bridge.playerLoadX;
     imbalance += bridge.playerLoadX * PLAYER_MASS;
   }
+  for (const remoteLoad of Coop.bridgeLoads(bridge.floor)) {
+    imbalance += remoteLoad.x * remoteLoad.mass;
+  }
 
   bridge.wobbleT += dt;
   const massAmp = Math.min(0.34, stats.loadSpan * 0.018 + Math.abs(stats.imbalance) * 0.012);
@@ -1706,11 +2095,16 @@ function update(dt) {
     pz = state.jumping ? state.jumpWorldZ : state.playerZ;
   }
   player.position.set(px, py, pz);
+  state.worldX = px;
+  state.worldY = py;
+  state.worldZ = pz;
   // Lean with whichever bridge is supporting the player
   if (state.onUpper || (state.onBridge && !state.jumping)) player.rotation.z = -activeBridge().tilt * 0.5;
   else player.rotation.z = 0;
   // Face the forward direction
   player.rotation.y = state.cameraYaw + Math.PI;
+  Coop.updateRemoteMeshes();
+  Coop.tick(dt);
 
   // === Camera orbit around player (yaw + pitch from RMB drag) ===
   const flatDist = state.cameraDist * Math.cos(state.cameraPitch);
