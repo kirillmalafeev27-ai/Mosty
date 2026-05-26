@@ -43,6 +43,10 @@ const UPHILL_CLIMB_SPEED = 2.2; // guaranteed climb when walking against a steep
 const WALK_SPEED = 5.0;       // m/s — constant, same in every phase
 const GAP_JUMP_SPEED = 6.6;   // short hop across missing bridge sections
 const GAP_JUMP_VY = 6.4;
+const NARROW_BRIDGE_HALF_WIDTH = 0.48;
+const ICE_HALF_WIDTH = 0.45;
+const ICE_MOVE_AMP = 1.15;
+const ICE_MOVE_SPEED = 0.22;  // very slow side-to-side drift
 const PLAYER_LOAD_FOLLOW_RATE = 0.7; // low-pass player torque so the bridge lags behind quick side swaps
 // Bridge spring-damper tuning. omega_n = sqrt(K_SPRING) ≈ 1.84 rad/s → heavier, slower seesaw.
 // Equilibrium tilt = imbalance * K_GRAV / K_SPRING = imbalance * 0.16.
@@ -78,6 +82,12 @@ const QUESTION_BRIDGE_TYPES = new Set([
   'pairs',
 ]);
 
+const MOVING_JUMP_BRIDGE_TYPES = new Set([
+  'missingOne',
+  'missingTwoPairs',
+  'narrow',
+]);
+
 const BRIDGE_TYPE_LABELS = {
   plain: 'обычный мост',
   rocking: 'качающийся мост',
@@ -106,6 +116,10 @@ function isQuestionBridge(bridge) {
   return QUESTION_BRIDGE_TYPES.has(bridge.type);
 }
 
+function canUseMovingJump(bridge) {
+  return bridge && MOVING_JUMP_BRIDGE_TYPES.has(bridge.type);
+}
+
 function floorBaseY(floor = state.round) {
   return (floor - 1) * FLOOR_HEIGHT;
 }
@@ -127,6 +141,7 @@ const state = {
   jumpMode: 'none',
   jumpLocalVX: 0,
   jumpLocalVZ: 0,
+  pickupGrace: 0,
   onBridge: true,
   jumping: false,
   launchSuccess: false,
@@ -234,6 +249,17 @@ const PLANK_YELLOW = 0xf2b430;
 const FRAME_GREEN = 0x2d6a3f;
 const RAIL_DARK = 0x1d4a2a;
 
+function rememberPartTransform(part) {
+  part.userData.defaultPosition = part.position.clone();
+  part.userData.defaultScale = part.scale.clone();
+}
+
+function resetPartTransform(part) {
+  if (!part.userData.defaultPosition || !part.userData.defaultScale) return;
+  part.position.copy(part.userData.defaultPosition);
+  part.scale.copy(part.userData.defaultScale);
+}
+
 function makeBridge(length, width) {
   const g = new THREE.Group();
   const plankMat = new THREE.MeshStandardMaterial({ color: PLANK_YELLOW, roughness: 0.85 });
@@ -255,6 +281,7 @@ function makeBridge(length, width) {
     const floor = new THREE.Mesh(new THREE.BoxGeometry(sectionLen, 0.3, width), plankMat);
     floor.position.x = x;
     floor.castShadow = true; floor.receiveShadow = true;
+    rememberPartTransform(floor);
     g.add(floor);
 
     const grid = new THREE.Mesh(
@@ -263,6 +290,7 @@ function makeBridge(length, width) {
     );
     grid.position.set(x, 0.18, 0);
     grid.receiveShadow = true;
+    rememberPartTransform(grid);
     g.add(grid);
 
     g.userData.deckSections.push({ floor, grid, x, halfLen: sectionLen / 2 });
@@ -272,6 +300,7 @@ function makeBridge(length, width) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(length, 0.5, 0.3), plankMat);
     b.position.set(0, 0.1, z);
     b.castShadow = true; b.receiveShadow = true;
+    rememberPartTransform(b);
     g.add(b);
     g.userData.sideBoards.push(b);
   }
@@ -282,6 +311,7 @@ function makeBridge(length, width) {
       const p = new THREE.Mesh(new THREE.BoxGeometry(0.25, postH, 0.25), frameMat);
       p.position.set(x, postH / 2, z);
       p.castShadow = true;
+      rememberPartTransform(p);
       g.add(p);
       g.userData.posts.push(p);
     }
@@ -290,6 +320,7 @@ function makeBridge(length, width) {
     const r = new THREE.Mesh(new THREE.BoxGeometry(length, 0.18, 0.18), railMat);
     r.position.set(0, postH, z);
     r.castShadow = true;
+    rememberPartTransform(r);
     g.add(r);
     g.userData.rails.push(r);
   }
@@ -298,6 +329,7 @@ function makeBridge(length, width) {
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.22, width), frameMat);
     bar.position.set(x, 0.16, 0);
     bar.castShadow = true;
+    rememberPartTransform(bar);
     g.add(bar);
     g.userData.bars.push(bar);
   }
@@ -333,6 +365,8 @@ function createBridge(floor) {
     biasTorque: 0,
     windDir: 0,
     windT: Math.random() * 5,
+    iceT: Math.random() * Math.PI * 2,
+    iceZone: null,
     idleT: 0,
     birdCooldown: 0,
     bird: null,
@@ -550,10 +584,15 @@ function clearBridgeDecor(bridge) {
   for (const item of bridge.decor) bridge.group.remove(item);
   bridge.decor = [];
   const parts = bridge.group.userData;
-  for (const part of [...parts.rails, ...parts.posts, ...parts.sideBoards, ...parts.bars]) part.visible = true;
+  for (const part of [...parts.rails, ...parts.posts, ...parts.sideBoards, ...parts.bars]) {
+    part.visible = true;
+    resetPartTransform(part);
+  }
   for (const section of parts.deckSections || []) {
     section.floor.visible = true;
     section.grid.visible = true;
+    resetPartTransform(section.floor);
+    resetPartTransform(section.grid);
   }
   if (parts.grid) parts.grid.visible = true;
   if (parts.floor) parts.floor.scale.z = 1;
@@ -638,6 +677,24 @@ function missingBridgeSlots(bridge) {
   return missingIndex === 2 ? [-4.0, -1.4, 1.4, 4.0] : [-4.0, -0.8, 0.8, 4.0];
 }
 
+function makeBridgeVisuallyNarrow(bridge, halfWidth) {
+  const parts = bridge.group.userData;
+  const targetWidth = halfWidth * 2;
+  const scaleZ = targetWidth / LOWER_WID;
+  const edgeZ = halfWidth;
+
+  for (const section of parts.deckSections || []) {
+    section.floor.scale.z = scaleZ;
+    section.grid.scale.z = scaleZ;
+  }
+  for (const bar of parts.bars) bar.scale.z = scaleZ;
+
+  for (const part of [...parts.sideBoards, ...parts.rails, ...parts.posts]) {
+    const side = Math.sign(part.userData.defaultPosition?.z || part.position.z) || 1;
+    part.position.z = side * edgeZ;
+  }
+}
+
 function applyBridgeVariant(bridge) {
   const parts = bridge.group.userData;
   bridge.category = isQuestionBridge(bridge) ? 'question' : 'physical';
@@ -646,6 +703,7 @@ function applyBridgeVariant(bridge) {
   bridge.windDir = 0;
   bridge.noRails = false;
   bridge.iceBand = null;
+  bridge.iceZone = null;
   bridge.narrowZone = null;
   bridge.longJump = false;
   bridge.missingX = [];
@@ -676,13 +734,13 @@ function applyBridgeVariant(bridge) {
     bridge.group.add(crate);
     bridge.decor.push(crate);
   } else if (bridge.type === 'ice') {
-    bridge.iceBand = { zMin: -0.45, zMax: 0.45 };
-    addDeckZone(bridge, 0, 0, LOWER_LEN - 0.9, 0.9, zoneMaterials.ice, 0.38);
+    bridge.iceT = Math.random() * Math.PI * 2;
+    bridge.iceBand = { centerZ: 0, halfWidth: ICE_HALF_WIDTH, zMin: -ICE_HALF_WIDTH, zMax: ICE_HALF_WIDTH };
+    bridge.iceZone = addDeckZone(bridge, 0, 0, LOWER_LEN - 0.9, ICE_HALF_WIDTH * 2, zoneMaterials.ice, 0.38);
   } else if (bridge.type === 'narrow') {
-    bridge.narrowZone = { xMin: -0.9, xMax: 0.9, halfWidth: 0.48 };
+    bridge.narrowZone = { halfWidth: NARROW_BRIDGE_HALF_WIDTH };
     bridge.longJump = true;
-    addDeckZone(bridge, 0, 1.45, 1.8, 1.6, zoneMaterials.narrow, 0.38);
-    addDeckZone(bridge, 0, -1.45, 1.8, 1.6, zoneMaterials.narrow, 0.38);
+    makeBridgeVisuallyNarrow(bridge, NARROW_BRIDGE_HALF_WIDTH);
   } else if (bridge.type === 'anchor') {
     bridge.mode = 'anchor';
   } else if (bridge.type === 'multiCorrect') {
@@ -860,6 +918,7 @@ function startRound() {
   state.playerY = 0; state.playerVY = 0;
   state.jumpStartX = 0; state.jumpStartZ = 0; state.jumpWorldX = 0; state.jumpWorldZ = 0; state.jumpBaseY = 0;
   state.jumpMode = 'none'; state.jumpLocalVX = 0; state.jumpLocalVZ = 0;
+  state.pickupGrace = 0;
   state.onBridge = true; state.jumping = false;
   state.launchSuccess = false; state.launchT = 0;
   state.phase = 'choose';
@@ -870,7 +929,7 @@ function startRound() {
   syncQuestionHud();
   updateHud();
   updateFloorMarkers();
-  setHint('Сними три неверных ответа на этом мосту, затем прыгай строго вверх на следующий.');
+  setHint(`Сними три неверных ответа. ${bridgeControlsHint(activeBridge())}`);
 }
 
 function updateHud() {
@@ -894,14 +953,23 @@ function updateFloorMarkers(completedCurrent = false) {
 
 function setHint(text) { hintEl.textContent = text; }
 
+function bridgeControlsHint(bridge) {
+  return canUseMovingJump(bridge)
+    ? 'На этом мосту движение + пробел = короткий прыжок, пробел без движения = прыжок вверх после очистки.'
+    : 'На этом мосту пробел нужен только для прыжка вверх после очистки.';
+}
+
 // -------- Removing a weight by walking onto it --------
 function maybePickup() {
   if (state.phase !== 'choose') return;
+  if (state.pickupGrace > 0) return;
+  const bridge = activeBridge();
+  const pickRadius = bridge.type === 'narrow' ? 0.72 : PICK_RADIUS;
   for (const w of state.weights) {
     if (w.removed) continue;
     const dx = state.playerX - w.slot;
     const dz = state.playerZ - w.zOff;
-    if (dx * dx + dz * dz < PICK_RADIUS * PICK_RADIUS) {
+    if (dx * dx + dz * dz < pickRadius * pickRadius) {
       removeWeight(w);
       break;
     }
@@ -960,7 +1028,9 @@ function removeWeight(w) {
       return;
     }
     state.phase = 'jump';
-    setHint('Чисто! Теперь встань на поднятый край моста и только там прыгай вверх.');
+    setHint(canUseMovingJump(bridge)
+      ? 'Чисто! Встань на поднятый край: пробел без движения прыгает вверх, движение + пробел делает короткий прыжок.'
+      : 'Чисто! Встань на поднятый край и нажми пробел, чтобы прыгнуть вверх.');
   }
 }
 
@@ -1043,7 +1113,7 @@ function bindRendererInput() {
 // -------- Jump --------
 function tryGapJump() {
   const bridge = activeBridge();
-  if (!bridge.missingSections || !bridge.missingSections.length) return false;
+  if (!canUseMovingJump(bridge)) return false;
   if (!state.onBridge || state.jumping || (state.phase !== 'choose' && state.phase !== 'jump')) return false;
 
   const { forward, strafe } = movementInput();
@@ -1058,7 +1128,9 @@ function tryGapJump() {
   state.playerVY = GAP_JUMP_VY;
   state.playerY = 0;
   state.jumpBaseY = bridgeSurfaceYAt(bridge, state.playerX, state.playerZ);
-  setHint('Прыжок через пролёт: держи направление, пока летишь.');
+  setHint(bridge.type === 'narrow'
+    ? 'Прыжок с движением: перелети гриб и держи узкую линию.'
+    : 'Прыжок с движением: держи направление, пока летишь.');
   Sound && Sound.rush && Sound.rush();
   return true;
 }
@@ -1191,7 +1263,7 @@ function landOnNextBridge(landingLocalX) {
   pruneOldBridges();
   updateHud();
   updateFloorMarkers();
-  setHint('Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы.');
+  setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
 }
 
 // -------- Render loop --------
@@ -1266,7 +1338,19 @@ function spawnRock(bridge) {
   bridge.rocks.push({ x, z, warning, rock, warnT: 1.5, falling: false });
 }
 
+function updateIceBand(bridge, dt) {
+  if (!bridge.iceBand) return;
+  bridge.iceT += dt * ICE_MOVE_SPEED;
+  const centerZ = Math.sin(bridge.iceT) * ICE_MOVE_AMP;
+  bridge.iceBand.centerZ = centerZ;
+  bridge.iceBand.zMin = centerZ - bridge.iceBand.halfWidth;
+  bridge.iceBand.zMax = centerZ + bridge.iceBand.halfWidth;
+  if (bridge.iceZone) bridge.iceZone.position.z = centerZ;
+}
+
 function updateBridgeHazards(bridge, dt, moveIntent) {
+  updateIceBand(bridge, dt);
+
   if (bridge.mode === 'memory' && bridge.memoryTimer > 0) {
     bridge.memoryTimer -= dt;
     if (bridge.memoryTimer <= 0 && bridge === activeBridge()) {
@@ -1325,6 +1409,7 @@ function updateBridgeHazards(bridge, dt, moveIntent) {
 
 function update(dt) {
   state.upperT += dt;
+  state.pickupGrace = Math.max(0, state.pickupGrace - dt);
   const currentBridge = activeBridge();
 
   // === All bridges keep rocking in the stack ===
@@ -1369,8 +1454,11 @@ function update(dt) {
     }
 
     const downhillDir = Math.sign(gSin);
+    if (onIce && downhillDir && walkVx * downhillDir < 0) {
+      walkVx = 0;
+    }
     const uphillInput = downhillDir ? Math.max(0, -walkVx * downhillDir) : 0;
-    if (uphillInput > 0.15) {
+    if (!onIce && uphillInput > 0.15) {
       const targetClimb = Math.min(UPHILL_CLIMB_SPEED, uphillInput * 0.55);
       const maxDownhillSlide = Math.max(0, uphillInput - targetClimb);
       const slideDownhill = state.slideVX * downhillDir;
@@ -1391,7 +1479,7 @@ function update(dt) {
     state.playerZ += walkVz * dt;
 
     // Keep player within bridge width (Z) — invisible wall on the long edges.
-    const halfW = LOWER_WID / 2 - 0.2;
+    const halfW = currentBridge.narrowZone?.halfWidth ?? (LOWER_WID / 2 - 0.2);
     if (currentBridge.noRails) {
       if (Math.abs(state.playerZ) > halfW + 0.35) {
         state.playerX = bridgeWorldXFromLocal(currentBridge, state.playerX);
@@ -1414,18 +1502,6 @@ function update(dt) {
       state.playerVZ = 0;
       state.playerVY = 0.15;
       fail('Провалился в снятую секцию настила');
-    }
-
-    if (currentBridge.narrowZone
-      && state.playerX >= currentBridge.narrowZone.xMin
-      && state.playerX <= currentBridge.narrowZone.xMax
-      && Math.abs(state.playerZ) > currentBridge.narrowZone.halfWidth) {
-      state.playerX = bridgeWorldXFromLocal(currentBridge, state.playerX);
-      state.onBridge = false;
-      state.playerVX = 0;
-      state.playerVZ = Math.sign(state.playerZ) * 1.8;
-      state.playerVY = 0.2;
-      fail('На узком месте надо идти строго по центру');
     }
 
     maybePickup();
@@ -1471,7 +1547,7 @@ function update(dt) {
       state.playerVY -= 18 * dt;
       state.playerY += state.playerVY * dt;
       if (!currentBridge.noRails) {
-        const halfW = LOWER_WID / 2 - 0.2;
+        const halfW = currentBridge.narrowZone?.halfWidth ?? (LOWER_WID / 2 - 0.2);
         state.playerZ = THREE.MathUtils.clamp(state.playerZ, -halfW, halfW);
       }
 
@@ -1492,8 +1568,8 @@ function update(dt) {
           state.playerVY = 0.15;
           fail('Провалился в снятую секцию настила');
         } else {
+          state.pickupGrace = 0.28;
           setHint('Перепрыгнул пролёт. Дальше снимай ответы или лови момент для прыжка наверх.');
-          maybePickup();
         }
       }
     } else {
