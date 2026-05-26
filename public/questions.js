@@ -342,6 +342,40 @@
       return this.formatAudioQuestion(raw, true, key);
     }
 
+    releaseQuestion(question) {
+      if (!question || !question.raw || !question.poolKey) return;
+      const key = question.poolKey;
+      if (!this.generatedPools[key]) this.generatedPools[key] = [];
+      if (!this.generatedPools[key].includes(question.raw)) {
+        this.generatedPools[key].unshift(question.raw);
+      }
+      const used = this.usedDisplays[key];
+      if (used) {
+        if (question.raw.display) used.delete(question.raw.display);
+        if (question.raw.audioText) used.delete(question.raw.audioText);
+      }
+    }
+
+    poolHasQuestion(context = {}) {
+      if (!this.generationAllowed) return true;
+      if (this.settings.mode === 'classic' || !this.status.generationConfigured) return true;
+      const key = this.settings.mode === 'audio'
+        ? this.audioKey()
+        : this.slotKey(this.slotForBridge(context.floor || 0));
+      return (this.generatedPools[key]?.length || 0) > 0;
+    }
+
+    async ensureQuestionAvailable(context = {}) {
+      if (!this.generationAllowed) return;
+      if (this.settings.mode === 'classic' || !this.status.generationConfigured) return;
+      if (this.settings.mode === 'audio') {
+        await this.ensureAudioPool(1, 10);
+        return;
+      }
+      const slot = this.slotForBridge(context.floor || 0);
+      await this.ensurePool(slot, 1, 10);
+    }
+
     ensurePool(slot, minCount = 1, requestCount = 10) {
       if (!this.status.generationConfigured) return Promise.resolve([]);
       const key = this.slotKey(slot);
@@ -445,7 +479,8 @@
         correctIndex: choices.indexOf(correctAnswer),
         correct: correctAnswer,
         generated,
-        poolKey,
+        poolKey: generated ? poolKey : '',
+        raw: generated ? raw : null,
         source: generated ? 'generated' : 'german-fallback',
       };
     }
@@ -464,7 +499,8 @@
         correctIndex: choices.indexOf(correctAnswer),
         correct: correctAnswer,
         generated,
-        poolKey,
+        poolKey: generated ? poolKey : '',
+        raw: generated ? raw : null,
         source: generated ? 'generated-audio' : 'audio-fallback',
       };
     }
@@ -658,6 +694,9 @@
   window.QuizQuestionBank = bank;
   window.pickQuestion = (cat, context) => bank.pickQuestion(cat, context);
   window.prepareMostyQuiz = (options) => bank.prepareForGame(options);
+  window.releaseQuizQuestion = (question) => bank.releaseQuestion(question);
+  window.quizPoolHasQuestion = (context) => bank.poolHasQuestion(context);
+  window.quizEnsureQuestionAvailable = (context) => bank.ensureQuestionAvailable(context);
   window.playQuizAudio = (question, force) => AudioQuiz.play(question, force);
 
   document.addEventListener('DOMContentLoaded', () => {
