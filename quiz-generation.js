@@ -14,28 +14,51 @@ const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_
 const TTS_CACHE_LIMIT = Number(process.env.TTS_CACHE_LIMIT || 180);
 
 const TOPIC_RULES = {
-  'Infinitiv mit zu': 'Use verbs and expressions that require zu + infinitive: versuchen, beginnen, aufhoeren, vorhaben, hoffen, vergessen, planen, sich freuen, Lust haben. Modal verbs use infinitive without zu.',
-  Modalverben: 'Modal verb is position 2 in main clauses; full infinitive goes to the end without zu.',
-  Perfekt: 'Use sein with movement/change of state; haben for most other verbs. Respect ge-/no-ge- patterns and separable verbs.',
-  Praeteritum: 'Regular verbs use -te endings; strong verbs change stem vowel; mixed verbs combine vowel change with -te.',
-  Dativ: 'Dative prepositions: mit, nach, bei, seit, von, zu, aus, gegenueber, ab. Dative verbs: helfen, danken, gehoeren, gefallen, schmecken, passen, gratulieren, antworten, folgen.',
-  Akkusativ: 'Accusative prepositions: durch, fuer, gegen, ohne, um. Transitive verbs take direct object in accusative.',
-  Genitiv: 'Genitive prepositions: wegen, trotz, waehrend, innerhalb, ausserhalb, statt. Masculine/neuter nouns usually add -(e)s.',
-  Artikel: 'German definite articles: der, die, das, die. Indefinite articles: ein/eine. Use common gender signals when possible.',
-  Negation: 'Use kein for nouns with an indefinite or zero article; nicht negates verbs, adjectives, adverbs and phrases.',
-  'Wortstellung im Hauptsatz': 'Finite verb is always in position 2. If an adverb/object starts the sentence, subject follows the finite verb.',
-  'Wortstellung im Nebensatz': 'Subordinate clauses with weil, dass, wenn, ob, obwohl place the finite verb at the end.',
-  'weil-Saetze': 'weil introduces a subordinate clause with finite verb at the end.',
-  'dass-Saetze': 'dass introduces a subordinate clause with finite verb at the end.',
-  'wenn-Saetze': 'wenn introduces a subordinate clause; if the wenn-clause comes first, the main clause starts with the finite verb.',
-  Relativsaetze: 'Relative pronoun agrees with antecedent in gender/number but gets case from its function inside the relative clause. Verb goes at the end.',
-  'Konjunktiv II': 'Use waere, haette, koennte, muesste, sollte, duerfte, wuerde + infinitive for wishes, advice and polite requests.',
-  Passiv: 'Process passive: werden + Partizip II. State passive: sein + Partizip II.',
-  Praesens: 'Present tense endings: -e, -st, -t, -en, -t, -en. Include common stem-vowel changes only when appropriate.',
-  Futur: 'Futur I uses werden + infinitive.',
-  Imperativ: 'du imperative is verb stem without -st; ihr uses present form without pronoun; Sie uses infinitive + Sie.',
-  Adjektivdeklination: 'After definite articles use weak endings; after indefinite articles use mixed endings; without articles use strong endings.',
-  Wechselpraepositionen: 'Two-way prepositions take accusative for direction and dative for location.',
+  'Infinitiv mit zu': `Verwende NUR Verben, die "zu + Infinitiv" verlangen: versuchen, beginnen, anfangen, aufhören, vorhaben, hoffen, vergessen, planen, sich freuen, Lust haben, Es ist wichtig/möglich/schwer... NIEMALS Modalverben (können, müssen, sollen, wollen, dürfen, mögen) — diese stehen mit Infinitiv OHNE "zu"! Richtig: "Er versucht, den Bahnhof zu finden." | Falsch: "Er kann den Bahnhof zu finden."`,
+
+  'Modalverben': `Modalverben: können, müssen, sollen, wollen, dürfen, mögen/möchten. Modalverb auf Position 2, Infinitiv am Satzende OHNE "zu"! Richtig: "Er kann den Bahnhof finden." | Falsch: "Er kann den Bahnhof zu finden."`,
+
+  'Perfekt': `sein + Partizip II bei: Bewegungsverben (gehen→ist gegangen, fahren→ist gefahren, kommen→ist gekommen, fliegen→ist geflogen, laufen→ist gelaufen), Zustandsänderung (einschlafen→ist eingeschlafen, aufwachen, sterben, werden, bleiben). haben + Partizip II bei ALLEN anderen Verben (machen→hat gemacht, essen→hat gegessen, lesen→hat gelesen). Partizip II: ge-...-t (regelmäßig: gemacht, gekauft), ge-...-en (unregelmäßig: gegangen, geschrieben). Verben auf -ieren: KEIN ge- (studiert, telefoniert). Trennbare: ge- zwischen Präfix und Stamm (ein·ge·kauft, auf·ge·standen). Untrennbare (be-, er-, ver-, ent-, zer-, emp-, miss-): KEIN ge- (besucht, verstanden, erzählt).`,
+
+  'Präteritum': `Regelmäßig: Stamm + -te/-test/-te/-ten/-tet/-ten (machte, sagtest). Unregelmäßig: Stammvokalwechsel OHNE -te (gehen→ging, sehen→sah, nehmen→nahm, schreiben→schrieb, lesen→las, sprechen→sprach). Mischverben: Vokalwechsel + -te (bringen→brachte, denken→dachte, kennen→kannte, wissen→wusste).`,
+
+  'Dativ': `Dativpräpositionen: mit, nach, bei, seit, von, zu, aus, gegenüber, ab. Dativverben: helfen, danken, gehören, gefallen, schmecken, passen, gratulieren, antworten, folgen. Formen: dem (m/n), der (f), den + -n (Pl). ein→einem (m/n), eine→einer (f).`,
+
+  'Akkusativ': `Akkusativpräpositionen: durch, für, gegen, ohne, um. Formen: den (m), die (f), das (n), die (Pl). ein→einen (m), eine (f), ein (n). Transitive Verben: sehen, kaufen, essen, trinken, lesen, schreiben, brauchen, haben, finden.`,
+
+  'Genitiv': `Genitivpräpositionen: wegen, trotz, während, innerhalb, außerhalb, statt/anstatt. Maskulin/Neutrum: des/eines + Nomen mit -(e)s (des Mannes, eines Kindes). Feminin: der/einer + Nomen OHNE Endung (der Frau, einer Studentin). Plural: der + Nomen OHNE Endung (der Kinder).`,
+
+  'Adjektivdeklination': `Nach bestimmtem Artikel (der/die/das): -e (Nom. Sg. alle Genera), -en (alle anderen Fälle). Nach unbestimmtem Artikel (ein/kein/mein): -er (Nom.m), -es (Nom./Akk.n), -e (Nom./Akk.f), -en (alle anderen). Ohne Artikel: starke Endungen — Signalendungen des bestimmten Artikels: -er (m.Nom), -e (f.Nom/Akk), -es (n.Nom/Akk), -en (Dat/Gen), -em (m/n.Dat). Richtig: "ein alter Mann" (m.Nom), "mit dem alten Mann" (m.Dat) | Falsch: "ein alten Mann", "mit dem alter Mann"`,
+
+  'Wechselpräpositionen': `an, auf, hinter, in, neben, über, unter, vor, zwischen. Wohin? (Bewegung/Richtung) → Akkusativ: "Ich stelle das Buch auf den Tisch." (stellen, legen, setzen, hängen) Wo? (Position/Ort) → Dativ: "Das Buch steht auf dem Tisch." (stehen, liegen, sitzen, hängen)`,
+
+  'Negation': `"nicht" verneint: Verben, Adjektive, Adverbien, Präpositionalphrasen. Position: vor dem verneinten Element. "kein/keine/keinen/keinem/keiner" ersetzt unbestimmten Artikel oder Nullartikel + Nomen. Richtig: "Ich habe kein Auto." | Falsch: "Ich habe nicht Auto." Richtig: "Ich komme nicht aus Berlin." | Falsch: "Ich komme kein aus Berlin."`,
+
+  'Wortstellung im Hauptsatz': `Finites Verb IMMER auf Position 2! Inversion bei Adverb/Objekt auf Pos.1: Verb Pos.2, Subjekt Pos.3. Richtig: "Gestern ging ich ins Kino." | Falsch: "Gestern ich ging ins Kino."`,
+
+  'Wortstellung im Nebensatz': `Nach Konjunktion (weil, dass, wenn, ob, als, nachdem, obwohl): finites Verb am SATZENDE. Richtig: "Ich weiß, dass er morgen kommt." | Falsch: "Ich weiß, dass er kommt morgen." Perfekt im Nebensatz: "..., weil er nach Hause gegangen ist." (Hilfsverb am Ende!)`,
+
+  'dass-Sätze': `"dass" + Nebensatzwortstellung (Verb am Ende). Richtig: "Ich glaube, dass er recht hat." | Falsch: "Ich glaube, dass er hat recht."`,
+
+  'weil-Sätze': `"weil" + Nebensatzwortstellung (Verb am Ende). Richtig: "Ich bleibe zu Hause, weil ich krank bin." | Falsch: "Ich bleibe zu Hause, weil ich bin krank."`,
+
+  'wenn-Sätze': `"wenn" + Verb am Ende. Hauptsatz nach wenn-Satz: Verb auf Position 1. Richtig: "Wenn es regnet, bleibe ich zu Hause." | Falsch: "Wenn es regnet, ich bleibe zu Hause."`,
+
+  'Relativsätze': `Relativpronomen: Genus/Numerus vom BEZUGSWORT, aber Kasus von der FUNKTION im Nebensatz! Bestimme den Kasus: Was ist die Rolle des Relativpronomens im Nebensatz? Subjekt→Nom, direktes Objekt→Akk, indirektes Objekt→Dat. Nom: der/die/das/die. Akk: den/die/das/die. Dat: dem/der/dem/denen. Gen: dessen/deren. Richtig: "Der Turm, den man sehen kann" (Akk! weil: man sieht DEN Turm). Falsch: "Der Turm, dem man sehen kann." Richtig: "Der Mann, dem ich helfe" (Dat! weil: ich helfe DEM Mann). Verb am Ende des Relativsatzes!`,
+
+  'Konjunktiv II': `Irreale Wünsche, höfliche Bitten, Ratschläge. würde + Infinitiv (Standard). Eigene Formen: wäre, hätte, könnte, müsste, sollte, dürfte, wüsste, käme, ginge, bräuchte. Richtig: "Wenn ich reich wäre, würde ich reisen." | Falsch: "Wenn ich reich würde sein..."`,
+
+  'Passiv': `Vorgangspassiv: werden + Partizip II. "Das Buch wird gelesen." Zustandspassiv: sein + Partizip II. "Das Fenster ist geöffnet." Agens: von + Dativ. Präteritum: wurde + P.II. Perfekt: ist + P.II + worden.`,
+
+  'Präsens': `Konjugation: -e, -st, -t, -en, -t, -en. Stammvokalwechsel (2./3. Sg.): e→i (sprechen→spricht, helfen→hilft), e→ie (lesen→liest, sehen→sieht), a→ä (fahren→fährt, schlafen→schläft). Verben auf -ten/-den: Bindevokal -e- (du arbeitest, er arbeitet).`,
+
+  'Futur I': `werden + Infinitiv. werden: werde, wirst, wird, werden, werdet, werden. Richtig: "Ich werde morgen kommen." | Falsch: "Ich werde morgen zu kommen."`,
+
+  'Imperativ': `du: Stamm (+e optional): "Komm!", "Mach!". e→i/ie bleibt: "Sprich!", "Lies!", "Nimm!" (KEIN -st, KEIN Pronomen). a→ä fällt weg: "Fahr!" (nicht "Fähr!"). ihr: wie Präsens ohne "ihr": "Kommt!", "Lest!". Sie: Infinitiv + Sie: "Kommen Sie!", "Lesen Sie!"`,
+
+  'Artikel': `Bestimmt: der (m), die (f), das (n), die (Pl). Unbestimmt: ein (m/n), eine (f). Genus-Regeln: -ung/-heit/-keit/-schaft/-tion/-tät → die. -chen/-lein → das. -er/-ling → oft der.`,
+
+  'Nominativ': `Subjekt im Nominativ. Prädikativ nach sein/werden/bleiben ebenfalls Nominativ. Richtig: "Der Mann ist ein guter Lehrer." | Falsch: "Der Mann ist einen guten Lehrer."`,
 };
 
 function aiKey() {
@@ -71,6 +94,24 @@ function normalizeAnswerText(value) {
 
 function answerLetterToIndex(letter) {
   return ['A', 'B', 'C', 'D'].indexOf(String(letter || '').trim().toUpperCase());
+}
+
+function normalizeTopicKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+    .replace(/Ä/g, 'A').replace(/Ö/g, 'O').replace(/Ü/g, 'U')
+    .replace(/ae/gi, 'a').replace(/oe/gi, 'o').replace(/ue/gi, 'u')
+    .replace(/saetze/gi, 'satze')
+    .replace(/[^a-z0-9]+/gi, '')
+    .toLowerCase();
+}
+
+function topicRuleFor(grammarTopic) {
+  const target = normalizeTopicKey(grammarTopic);
+  const entry = Object.entries(TOPIC_RULES).find(([key]) => normalizeTopicKey(key) === target);
+  return entry ? entry[1] : '';
 }
 
 function shuffle(items) {
@@ -323,32 +364,81 @@ function parseJsonAudioQuestions(rawText, expectedCount, level, lexicalTopic) {
 }
 
 function buildSyntheticPrompt({ level, lexicalTopic, grammarTopic, isWortstellung, questionsCount, exclude, topicRule }) {
-  const topicPart = topicRule ? `\nSpecific rule for "${grammarTopic}":\n${topicRule}\n` : '';
+  {
+    const ruleBlock = topicRule ? `\nSpezifische Regel fuer "${grammarTopic}":\n${topicRule}\n` : '';
+    const excludeBlock = exclude && exclude.length
+      ? `\nVerwende diese Saetze nicht erneut: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}\n`
+      : '';
+    const kind = isWortstellung
+      ? 'Wortstellungsuebungen. Die Aufgabe-Zeile enthaelt durcheinander gebrachte Woerter oder Satzteile.'
+      : 'Lueckenuebungen. Die Aufgabe-Zeile enthaelt einen deutschen Satz mit genau einer Luecke ___.';
+
+    return `Du bist ein erfahrener DaF-Lehrer und erstellst Multiple-Choice-Uebungen.
+
+Erstelle genau ${questionsCount} deutsche Grammatikuebungen.
+Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz ueber ${level}.
+Grammatikthema: ${grammarTopic}.
+Lexikalisches Thema: ${lexicalTopic || 'frei'}.
+Uebungstyp: ${kind}
+${ruleBlock}${excludeBlock}
+Qualitaetsregeln:
+1. Jede Aufgabe hat genau vier Antwortmoeglichkeiten A, B, C, D.
+2. Genau eine Antwort ist grammatisch korrekt.
+3. Die falschen Antworten sind plausibel, aber eindeutig falsch.
+4. Die richtige Antwort muss absolut korrekt sein. Wenn du unsicher bist, formuliere die Aufgabe neu.
+5. Loese jede deiner Aufgaben selbst und schreibe die Schluessel erst nach der Selbstpruefung.
+6. In den Loesungen muss der Buchstabe und der exakte Text der richtigen Option stehen.
+7. Keine abgeschnittenen Saetze. Keine Erklaerungen. Kein JSON. Kein Markdown.
+
+Ausgabeformat, exakt so:
+AUFGABEN
+1. Anweisung: Waehle die richtige Option.
+Satz: ...
+A) ...
+B) ...
+C) ...
+D) ...
+
+2. Anweisung: Waehle die richtige Option.
+Satz: ...
+A) ...
+B) ...
+C) ...
+D) ...
+
+LOESUNGEN
+1: A = exakter Text der Option A
+2: C = exakter Text der Option C
+
+Schreibe jetzt den vollstaendigen Block mit ${questionsCount} Aufgaben und danach den Loesungen.`;
+  }
+
+  const topicPart = topicRule ? `\nSpezifische Regel fuer "${grammarTopic}":\n${topicRule}\n` : '';
   const excludePart = exclude && exclude.length
-    ? `\nDo not reuse these sentences: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}\n`
+    ? `\nVerwende diese Saetze nicht erneut: ${exclude.slice(-10).map((item) => `"${item}"`).join(', ')}\n`
     : '';
   const taskKind = isWortstellung
-    ? 'word-order tasks. The Aufgabe/Satz line contains mixed words or sentence parts.'
-    : 'gap-fill tasks. The Satz line contains one German sentence with exactly one blank ___.';
+    ? 'Wortstellungsuebungen. Die Aufgabe-Zeile enthaelt durcheinander gebrachte Woerter oder Satzteile.'
+    : 'Lueckenuebungen. Die Aufgabe-Zeile enthaelt einen deutschen Satz mit genau einer Luecke ___.';
 
-  return `You are an experienced DaF teacher creating multiple-choice exercises.
+  return `Du bist ein erfahrener DaF-Lehrer und erstellst Multiple-Choice-Uebungen.
 
-Create exactly ${questionsCount} German grammar exercises.
-Level: ${level}. Do not use grammar or vocabulary above ${level}.
-Grammar topic: ${grammarTopic}.
-Lexical topic: ${lexicalTopic || 'free'}.
-Exercise type: ${taskKind}
+Erstelle genau ${questionsCount} deutsche Grammatikuebungen.
+Niveau: ${level}. Verwende keine Grammatik und keinen Wortschatz ueber ${level}.
+Grammatikthema: ${grammarTopic}.
+Lexikalisches Thema: ${lexicalTopic || 'frei'}.
+Uebungstyp: ${taskKind}
 ${topicPart}${excludePart}
-Quality rules:
-1. Each task has exactly four answer options A, B, C, D.
-2. Exactly one answer is grammatically correct.
-3. Wrong answers are plausible but clearly wrong.
-4. The correct answer must be fully correct. If unsure, rewrite the task.
-5. Solve every task yourself before writing the answer key.
-6. The answer key must include the letter and the exact text of the correct option.
-7. No explanations, no Markdown, no JSON.
+Qualitaetsregeln:
+1. Jede Aufgabe hat genau vier Antwortmoeglichkeiten A, B, C, D.
+2. Genau eine Antwort ist grammatisch korrekt.
+3. Die falschen Antworten sind plausibel, aber eindeutig falsch.
+4. Die richtige Antwort muss absolut korrekt sein. Wenn du unsicher bist, formuliere die Aufgabe neu.
+5. Loese jede deiner Aufgaben selbst und schreibe die Schluessel erst nach der Selbstpruefung.
+6. In den Loesungen muss der Buchstabe und der exakte Text der richtigen Option stehen.
+7. Keine abgeschnittenen Saetze. Keine Erklaerungen. Kein JSON. Kein Markdown.
 
-Output format, exactly:
+Ausgabeformat, exakt so:
 AUFGABEN
 1. Anweisung: Выбери правильный вариант.
 Satz: ...
@@ -491,13 +581,12 @@ function installQuizRoutes(app) {
       isWortstellung,
       questionsCount,
       exclude: Array.isArray(exclude) ? exclude : [],
-      topicRule: TOPIC_RULES[grammarTopic] || '',
+      topicRule: topicRuleFor(grammarTopic),
     });
 
     try {
       const text = await requestAiText(prompt, 8192);
-      let valid = parseSyntheticQuestions(text, questionsCount);
-      if (!valid.length) valid = parseJsonQuestions(text);
+      const valid = parseSyntheticQuestions(text, questionsCount);
       if (!valid.length) {
         return res.status(502).json({ error: 'No valid synthetic questions in LLM response' });
       }
