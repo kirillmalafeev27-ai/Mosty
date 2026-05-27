@@ -35,10 +35,33 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 .hint { position: fixed; bottom: calc(100px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 12px; background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 6px; z-index: 4; pointer-events: none; }
 
 .overlay { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; }
-.overlay .card { background: #15192a; border: 1px solid var(--line); padding: 24px 28px; border-radius: 14px; min-width: 280px; max-width: 420px; text-align: center; }
+.overlay .card { background: #15192a; border: 1px solid var(--line); padding: 24px 28px; border-radius: 14px; min-width: 280px; max-width: 520px; text-align: center; }
 .overlay h2 { margin: 0 0 8px; font-size: 28px; }
 .overlay p { margin: 0 0 18px; color: var(--muted); }
 .overlay-extra { margin: 0 0 18px; }
+.run-summary { display: grid; gap: 14px; text-align: left; margin: 6px 0 14px; }
+.run-summary .sum-headline { font-size: 15px; font-weight: 800; color: #ffe9b5; text-align: center; line-height: 1.45; }
+.run-summary .sum-delta { font-weight: 900; }
+.run-summary .sum-delta.good { color: #5ce58a; }
+.run-summary .sum-delta.bad { color: #ff8a8a; }
+.run-summary .sum-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; background: rgba(255,255,255,0.04); border-radius: 8px; font-size: 13px; }
+.run-summary .sum-row b { color: #f7c85a; }
+.run-summary .sum-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a8478; margin: 0 0 -4px; }
+.run-summary .sum-floors { display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); gap: 6px; max-height: 168px; overflow-y: auto; }
+.run-summary .sum-floor { padding: 6px 4px; border-radius: 6px; text-align: center; font-size: 11px; line-height: 1.2; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+.run-summary .sum-floor .sum-grade { display: block; font-size: 16px; font-weight: 900; }
+.run-summary .sum-floor.grade-S .sum-grade { color: #ffd95c; }
+.run-summary .sum-floor.grade-A .sum-grade { color: #5ce58a; }
+.run-summary .sum-floor.grade-B .sum-grade { color: #aad6ff; }
+.run-summary .sum-floor.grade-C .sum-grade { color: #c9c2b8; }
+.run-summary .sum-floor.died { background: rgba(255,90,90,0.18); border-color: rgba(255,90,90,0.5); }
+.run-summary .sum-floor.died .sum-grade { color: #ff8a8a; }
+.run-summary .sum-perks { display: flex; flex-wrap: wrap; gap: 6px; }
+.run-summary .sum-perks .sum-perk { padding: 4px 9px; background: rgba(244,185,66,0.14); border: 1px solid rgba(244,185,66,0.4); border-radius: 12px; font-size: 11px; font-weight: 700; color: #ffd47a; }
+.run-summary .sum-empty { color: #8a8478; font-style: italic; font-size: 12px; }
+.active-perks { position: fixed; right: calc(12px + env(safe-area-inset-right)); top: calc(64px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 4px; z-index: 5; max-width: 220px; pointer-events: none; }
+.active-perks[hidden] { display: none; }
+.active-perks .perk-chip { background: rgba(15, 20, 28, 0.82); border: 1px solid rgba(244,185,66,0.55); color: #ffd47a; padding: 4px 10px; border-radius: 14px; font-size: 11px; font-weight: 700; backdrop-filter: blur(4px); box-shadow: 0 4px 10px rgba(0,0,0,0.18); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perk-choice-grid { display: grid; gap: 10px; text-align: left; }
 .perk-card { width: 100%; display: grid; gap: 5px; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
 .perk-card:hover { border-color: rgba(247,200,90,0.55); background: rgba(247,200,90,0.1); }

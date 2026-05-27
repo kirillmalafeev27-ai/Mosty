@@ -37,7 +37,7 @@ const UPPER_X_FREQ = 0.65;    // radians / sec
 const JUMP_REACH = 5.55;      // max vertical clearance; center jumps should not reach the next bridge
 const MIN_LAUNCH_LIFT = 0.35; // current bridge must lift the player's feet this much above its center
 const MIN_LAUNCH_EDGE_X = 2.2; // player must commit to a side before jumping upward
-const FAIL_TILT = 1.3;        // ~74°: only kicks in if the bridge truly flips
+const FAIL_TILT = 0.95;       // ~54°: bridge is steep but not fully flipped — fairer visual signal
 const STATIC_MU = 0.32;       // shoes-on-metal-ish; player won't slide if tan(tilt) < this
 const UPHILL_CLIMB_SPEED = 2.2; // guaranteed climb when walking against a steep slope
 const WALK_SPEED = 5.0;       // m/s — constant, same in every phase
@@ -389,6 +389,11 @@ const state = {
   runShards: 0,
   runRescues: 0,
   runSeed: 0,
+  runHistory: [],
+  runStartedAt: 0,
+  previousBestFloor: 1,
+  failureReason: '',
+  failureBridgeType: '',
   restartMode: 'new',
   perkActive: false,
   aiResumePhase: null,
@@ -437,6 +442,12 @@ overlayExtra.id = 'overlay-extra';
 overlayExtra.className = 'overlay-extra';
 if (ovBody?.parentElement) ovBody.parentElement.insertBefore(overlayExtra, ovRestart);
 
+const activePerksEl = document.createElement('div');
+activePerksEl.id = 'active-perks';
+activePerksEl.className = 'active-perks';
+activePerksEl.hidden = true;
+document.body.appendChild(activePerksEl);
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -457,6 +468,21 @@ function clearOverlayExtra() {
   if (ovRestart) ovRestart.hidden = false;
 }
 
+function updateActivePerksUi() {
+  const perks = state.perks || [];
+  if (!perks.length) {
+    activePerksEl.hidden = true;
+    activePerksEl.innerHTML = '';
+    return;
+  }
+  activePerksEl.hidden = false;
+  activePerksEl.innerHTML = perks.map(id => {
+    const perk = PERKS.find(p => p.id === id);
+    if (!perk) return '';
+    return `<span class="perk-chip" title="${escapeHtml(perk.desc)}">${escapeHtml(perk.name)}</span>`;
+  }).join('');
+}
+
 function isCheckpointFloor(floor) {
   return floor > 1 && (floor - 1) % CHECKPOINT_INTERVAL === 0;
 }
@@ -475,9 +501,8 @@ function effectivePickRadius(bridge) {
 }
 
 function earlyMercyForFloor(floor = state.round) {
-  if (floor <= 3) return 1;
-  if (floor <= 6) return 0.45;
-  return 0;
+  // Smooth linear ramp instead of step cliff: floor 1 = 1.0, floor 11 = 0.
+  return Math.max(0, 1 - ((Number(floor) || 1) - 1) / 10);
 }
 
 function effectiveFailTilt() {
@@ -1666,6 +1691,7 @@ function updateMetaUi() {
       ? `Реликвии забега: ${names.join(' + ')}`
       : `Рекорд: мост ${profile.bestFloor || 1}. В каждом забеге есть 1 бесплатное спасение.`;
   }
+  updateActivePerksUi();
 }
 
 initMetaUi();
@@ -2162,6 +2188,11 @@ function startRound(options = {}) {
   state.offeredPerkFloors = resuming ? [...state.checkpointOfferFloors] : [];
   state.runShards = resuming ? state.runShards : 0;
   state.runRescues = startingRescueCharges();
+  state.runHistory = resuming ? (state.runHistory || []).filter(h => h.floor < state.checkpointFloor) : [];
+  state.runStartedAt = performance.now();
+  state.failureReason = '';
+  state.failureBridgeType = '';
+  state.previousBestFloor = profile.bestFloor || 1;
   state.restartMode = 'new';
   state.best = Math.max(state.best, profile.bestStreak || 0);
   if (!resuming) {
@@ -2629,14 +2660,83 @@ function resetToSafeSpot(reason) {
   Sound && Sound.good && Sound.good();
 }
 
+function bridgeKillerLabel() {
+  const type = state.failureBridgeType || activeBridge()?.type || '';
+  return BRIDGE_TYPE_LABELS[type] || type || 'мост';
+}
+
+function buildRunSummaryHtml({ outcome, reason, gained }) {
+  const history = state.runHistory || [];
+  const cleared = history.filter(h => !h.tutorial);
+  const reached = state.round;
+  const previousBest = state.previousBestFloor || 1;
+  let delta = '';
+  if (outcome === 'fail') {
+    if (reached > previousBest) {
+      delta = `<span class="sum-delta good">+${reached - previousBest} к рекорду (было ${previousBest})</span>`;
+    } else if (reached === previousBest) {
+      delta = `<span class="sum-delta">повторил рекорд ${previousBest}</span>`;
+    } else {
+      delta = `<span class="sum-delta bad">−${previousBest - reached} от рекорда ${previousBest}</span>`;
+    }
+  } else if (outcome === 'win') {
+    delta = `<span class="sum-delta good">Башня закрыта!</span>`;
+  }
+
+  const grades = cleared.reduce((acc, h) => {
+    if (h.grade) acc[h.grade] = (acc[h.grade] || 0) + 1;
+    return acc;
+  }, {});
+  const gradesStr = ['S', 'A', 'B', 'C']
+    .filter(g => grades[g])
+    .map(g => `<b>${g}</b>×${grades[g]}`)
+    .join(' · ') || '—';
+
+  const cellList = history.map(h => {
+    const label = BRIDGE_TYPE_LABELS[h.type] || h.type;
+    const grade = h.tutorial ? '✓' : (h.grade || '—');
+    const cls = h.tutorial ? 'grade-A' : `grade-${h.grade || 'C'}`;
+    return `<div class="sum-floor ${cls}" title="${escapeHtml(label)}"><span class="sum-grade">${grade}</span>${h.floor}</div>`;
+  });
+  if (outcome === 'fail') {
+    const failLabel = BRIDGE_TYPE_LABELS[state.failureBridgeType] || state.failureBridgeType || '';
+    cellList.push(`<div class="sum-floor died" title="Здесь упал: ${escapeHtml(failLabel)}"><span class="sum-grade">✗</span>${reached}</div>`);
+  }
+
+  const perks = (state.perks || []).map(id => PERKS.find(p => p.id === id)?.name).filter(Boolean);
+  const perksHtml = perks.length
+    ? `<div class="sum-perks">${perks.map(n => `<span class="sum-perk">${escapeHtml(n)}</span>`).join('')}</div>`
+    : `<div class="sum-empty">Реликвий в этом забеге не было.</div>`;
+
+  const headline = outcome === 'fail'
+    ? `Упал на мосту <b>${reached}</b> · ${escapeHtml(bridgeKillerLabel())}<br>${escapeHtml(reason)}`
+    : 'Башня пройдена полностью';
+
+  return `
+    <div class="run-summary">
+      <div class="sum-headline">${headline}<br>${delta}</div>
+      <div class="sum-row"><span>Очки</span><span><b>${state.score}</b></span></div>
+      <div class="sum-row"><span>Осколки за забег</span><span><b>+${gained}</b></span></div>
+      <div class="sum-row"><span>Очищено мостов</span><span><b>${cleared.length}</b> (всего рекорд ${profile.bestFloor || 1})</span></div>
+      <div class="sum-row"><span>Оценки</span><span>${gradesStr}</span></div>
+      <div class="sum-section-title">Пройденные мосты</div>
+      <div class="sum-floors">${cellList.join('')}</div>
+      <div class="sum-section-title">Реликвии</div>
+      ${perksHtml}
+    </div>
+  `;
+}
+
 function showRunEnd(reason, gained) {
   const checkpointText = state.restartMode === 'checkpoint'
-    ? `Кнопка продолжит с чекпоинта: мост ${state.checkpointFloor}.`
-    : 'До первого чекпоинта нужно добраться до 4-го моста.';
+    ? `Можно продолжить с чекпоинта (мост ${state.checkpointFloor}) или начать заново.`
+    : 'Жми «Заново», чтобы пробовать ещё.';
   ovTitle.textContent = 'Падение';
-  ovBody.textContent = `${reason}. Мост: ${state.round}. Очки: ${state.score}. Осколки за попытку: +${gained}. Лучший мост: ${profile.bestFloor || 1}. ${checkpointText}`;
+  ovBody.innerHTML = checkpointText;
   if (ovRestart) ovRestart.textContent = state.restartMode === 'checkpoint' ? 'С чекпоинта' : 'Новый забег';
-  clearOverlayExtra();
+  overlayExtra.innerHTML = buildRunSummaryHtml({ outcome: 'fail', reason, gained });
+  overlayExtra.hidden = false;
+  if (ovRestart) ovRestart.hidden = false;
   overlay.hidden = false;
 }
 
@@ -2648,6 +2748,10 @@ function fail(reason) {
   }
   state.phase = 'over';
   state.best = Math.max(state.best, state.streak);
+  state.failureReason = reason;
+  state.failureBridgeType = activeBridge()?.type || '';
+  // state.previousBestFloor was snapshotted at startRound — leave it as the
+  // pre-run record so the summary can show a real delta.
   const reached = Math.max(state.round, profile.bestFloor || 1);
   profile.bestFloor = reached;
   profile.bestStreak = Math.max(profile.bestStreak || 0, state.best);
@@ -2668,9 +2772,21 @@ function awardBridge(bridge) {
   const tutorialClear = bridge.tutorialStep > 0;
   const grade = bridgeGrade(bridge);
   const baseScore = tutorialClear ? 30 : 100 + state.streak * 25 + grade.scoreBonus;
-  state.score += Math.round(baseScore * runModMul('scoreMul'));
+  const scoreGain = Math.round(baseScore * runModMul('scoreMul'));
+  state.score += scoreGain;
   if (!tutorialClear) state.runShards += grantShards(grade.shards);
   state.lastGrade = tutorialClear ? '' : grade.label;
+  bridge.grade = tutorialClear ? '' : grade.label;
+  bridge.elapsed = bridge.startedAt ? (performance.now() - bridge.startedAt) / 1000 : 0;
+  state.runHistory.push({
+    floor: bridge.floor,
+    type: bridge.type,
+    grade: bridge.grade,
+    mistakes: bridge.mistakes || 0,
+    maxTilt: bridge.maxAbsTilt || 0,
+    elapsed: bridge.elapsed,
+    tutorial: tutorialClear,
+  });
   state.streak += 1;
   state.best = Math.max(state.best, state.streak);
   profile.bestFloor = Math.max(profile.bestFloor || 1, bridge.floor + 1);
@@ -2696,13 +2812,16 @@ function finishTower() {
   awardBridge(activeBridge());
   state.phase = 'win';
   setHint('Башня из мостов пройдена! Все задания закрыты.');
+  // previousBestFloor was set at startRound — keep it for the delta in the summary.
   const bonus = grantShards(25 + state.streak * 2);
   markProfileProgress();
   setTimeout(() => {
     ovTitle.textContent = 'Все мосты пройдены';
-    ovBody.textContent = `Финальный счет: ${state.score}. Серия: ${state.streak}. Бонус башни: +${bonus} осколков.`;
+    ovBody.textContent = `Финальный счёт ${state.score}. Серия ${state.streak}. Бонус башни +${bonus} осколков.`;
     if (ovRestart) ovRestart.textContent = 'Новый забег';
-    clearOverlayExtra();
+    overlayExtra.innerHTML = buildRunSummaryHtml({ outcome: 'win', reason: '', gained: bonus });
+    overlayExtra.hidden = false;
+    if (ovRestart) ovRestart.hidden = false;
     overlay.hidden = false;
   }, 700);
 }
@@ -2873,19 +2992,26 @@ function updateBridgeHazards(bridge, dt, moveIntent) {
   }
 
   if (bridge.mode === 'bird' && bridge === activeBridge() && state.onBridge && !state.jumping) {
-    bridge.idleT = moveIntent < 0.08 ? (bridge.idleT || 0) + dt : 0;
+    // Bird only menaces the player AFTER the bridge is clear, while they're
+    // supposed to be jumping. Reading the question itself is safe.
+    const shouldHunt = state.phase === 'jump';
+    if (shouldHunt) {
+      bridge.idleT = moveIntent < 0.08 ? (bridge.idleT || 0) + dt : 0;
+    } else {
+      bridge.idleT = 0;
+    }
     if (bridge.bird) {
-      bridge.bird.visible = bridge.idleT > 2.0;
-      bridge.bird.position.x = -6 + Math.min(1, Math.max(0, bridge.idleT - 2.0)) * 6;
+      bridge.bird.visible = bridge.idleT > 1.5;
+      bridge.bird.position.x = -6 + Math.min(1, Math.max(0, bridge.idleT - 1.5)) * 6;
       bridge.bird.position.z = state.playerZ;
     }
-    if (bridge.idleT > 3.0 + runModAdd('birdPatienceAdd') + earlyMercyForFloor() * 0.8) {
+    if (bridge.idleT > 3.5 + runModAdd('birdPatienceAdd') + earlyMercyForFloor() * 0.8) {
       state.playerX = bridgeWorldXFromLocal(bridge, state.playerX);
       state.onBridge = false;
       state.playerVX = 0;
       state.playerVZ = 3;
       state.playerVY = 0.3;
-      fail('Птица сбила тебя, потому что ты стоял на месте');
+      fail('Птица сбила тебя, потому что ты слишком долго стоял на очищенном мосту');
     }
   }
 
