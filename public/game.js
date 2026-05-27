@@ -106,9 +106,14 @@ const BRIDGE_TYPE_LABELS = {
   pairs: 'парные грибы',
   bird: 'пикирующая птица',
   rockfall: 'камнепад',
+  tutWalk: 'обучение: сними неверный',
+  tutBalance: 'обучение: следи за наклоном',
+  tutJump: 'обучение: прыжок наверх',
 };
 
-const EARLY_BRIDGE_SCRIPT = ['plain', 'biased', 'rocking', 'variedMass', 'plain'];
+const TUTORIAL_SCRIPT = ['tutWalk', 'tutBalance', 'tutJump'];
+const TUTORIAL_BRIDGE_TYPES = new Set(TUTORIAL_SCRIPT);
+const EARLY_BRIDGE_SCRIPT = ['plain', 'rocking', 'plain', 'variedMass', 'biased'];
 const TIER_EASY = ['plain', 'biased', 'rocking', 'variedMass'];
 const TIER_MID = ['plain', 'biased', 'rocking', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne'];
 const TIER_HARD = ['plain', 'rocking', 'biased', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne', 'memory', 'anti', 'sequence', 'anchor', 'bird', 'narrow', 'rockfall', 'missingTwoPairs'];
@@ -222,14 +227,40 @@ const PERKS = [
   },
 ];
 
-function deterministicPoolIndex(floor, pool) {
-  return Math.abs((floor * 9301 + Math.floor(floor / 3) * 49297 + 233) % pool.length);
+function mulberry32(seed) {
+  let s = (seed >>> 0) || 1;
+  return function() {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let runSeed = (Math.random() * 0xffffffff) >>> 0;
+const bridgeTypeCache = new Map();
+function setRunSeed(seed) {
+  runSeed = (seed >>> 0) || 1;
+  bridgeTypeCache.clear();
 }
 
 function bridgeTypeFor(floor) {
-  if (floor <= EARLY_BRIDGE_SCRIPT.length) return EARLY_BRIDGE_SCRIPT[floor - 1];
-  const pool = floor <= 8 ? TIER_EASY : floor <= 18 ? TIER_MID : TIER_HARD;
-  return pool[deterministicPoolIndex(floor, pool)];
+  if (!profile.tutorialDone && floor <= TUTORIAL_SCRIPT.length) {
+    return TUTORIAL_SCRIPT[floor - 1];
+  }
+  const earlyOffset = profile.tutorialDone ? 0 : TUTORIAL_SCRIPT.length;
+  const earlyFloor = floor - earlyOffset;
+  if (earlyFloor >= 1 && earlyFloor <= EARLY_BRIDGE_SCRIPT.length) {
+    return EARLY_BRIDGE_SCRIPT[earlyFloor - 1];
+  }
+  if (bridgeTypeCache.has(floor)) return bridgeTypeCache.get(floor);
+  const tierFloor = earlyFloor - EARLY_BRIDGE_SCRIPT.length;
+  const pool = tierFloor <= 7 ? TIER_EASY : tierFloor <= 16 ? TIER_MID : TIER_HARD;
+  const rng = mulberry32((runSeed ^ Math.imul(floor, 0x9E3779B1)) >>> 0);
+  const type = pool[Math.floor(rng() * pool.length)];
+  bridgeTypeCache.set(floor, type);
+  return type;
 }
 
 function defaultProfile() {
@@ -239,6 +270,7 @@ function defaultProfile() {
     bestFloor: 1,
     bestStreak: 0,
     runs: 0,
+    tutorialDone: false,
     upgrades: { grip: 0, reach: 0, safety: 0, choice: 0 },
   };
 }
@@ -248,11 +280,16 @@ function loadProfile() {
   try {
     const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
     if (!raw || typeof raw !== 'object') return base;
-    return {
+    const merged = {
       ...base,
       ...raw,
       upgrades: { ...base.upgrades, ...(raw.upgrades || {}) },
     };
+    // Existing players already past the tutorial-equivalent floor graduate automatically.
+    if (!merged.tutorialDone && (Number(merged.bestFloor) || 1) >= TUTORIAL_SCRIPT.length + 1) {
+      merged.tutorialDone = true;
+    }
+    return merged;
   } catch (_) {
     return base;
   }
@@ -351,7 +388,10 @@ const state = {
   checkpointOfferFloors: [],
   runShards: 0,
   runRescues: 0,
+  runSeed: 0,
   restartMode: 'new',
+  perkActive: false,
+  aiResumePhase: null,
   bridgeStartedAt: 0,
   bridgeMaxTilt: 0,
   bridgeMistakes: 0,
@@ -449,10 +489,14 @@ function effectiveJumpReach(bridge) {
 }
 
 function effectiveLaunchLift() {
+  const bridge = bridges.find(b => b.floor === state.round);
+  if (bridge?.tutorialStep > 0) return 0;
   return Math.max(0.18, MIN_LAUNCH_LIFT - earlyMercyForFloor() * 0.12);
 }
 
 function effectiveLaunchEdgeX() {
+  const bridge = bridges.find(b => b.floor === state.round);
+  if (bridge?.tutorialStep > 0) return 1.0;
   return Math.max(1.35, MIN_LAUNCH_EDGE_X - earlyMercyForFloor() * 0.45);
 }
 
@@ -499,8 +543,9 @@ function showPerkChoice() {
   const count = 3 + upgradeLevel('choice');
   const choices = choosePerkOptions(count);
   if (!choices.length) return false;
+  if (state.phase !== 'paused') state.aiResumePhase = state.phase;
+  state.perkActive = true;
   state.phase = 'paused';
-  state.pausedPhase = 'choose';
   state.offeredPerkFloors.push(state.round);
   overlay.hidden = false;
   ovTitle.textContent = 'Реликвия забега';
@@ -529,10 +574,17 @@ overlayExtra.addEventListener('click', event => {
   state.perks.push(perk.id);
   clearOverlayExtra();
   overlay.hidden = true;
-  state.phase = state.pausedPhase || 'choose';
-  state.pausedPhase = null;
+  state.perkActive = false;
+  // If AI generation is still running, stay paused; the AI .finally will resume.
+  if (!aiPauseActive) {
+    state.phase = state.aiResumePhase || 'choose';
+    state.aiResumePhase = null;
+  }
   setHint(`Реликвия взята: ${perk.name}. ${bridgeControlsHint(activeBridge())}`);
   updateMetaUi();
+  // Any AI work that was deferred while the perk overlay was up — kick it now.
+  const pending = bridges.find(b => b.pendingSetup);
+  if (pending) triggerAiPause(pending);
 });
 
 function bridgeGrade(bridge) {
@@ -803,7 +855,7 @@ function ensureBridge(floor) {
 
 // Sequence and pairs bridges build their question locally; everything else
 // (including multiCorrect/anti/memory) pulls one item from the AI pool.
-const SELF_CONTAINED_BRIDGE_TYPES = new Set(['sequence', 'pairs']);
+const SELF_CONTAINED_BRIDGE_TYPES = new Set(['sequence', 'pairs', 'tutWalk', 'tutBalance', 'tutJump']);
 function bridgeUsesAiPool(bridge) {
   if (typeof window.quizPoolHasQuestion !== 'function') return false;
   return !SELF_CONTAINED_BRIDGE_TYPES.has(bridge.type);
@@ -812,8 +864,13 @@ function bridgeUsesAiPool(bridge) {
 let aiPauseActive = false;
 function triggerAiPause(bridge) {
   if (aiPauseActive) return;
+  // Perk overlay is up — don't stomp it. Defer the AI work until the perk is chosen.
+  if (state.perkActive) {
+    bridge.pendingSetup = true;
+    return;
+  }
   aiPauseActive = true;
-  state.pausedPhase = state.phase === 'paused' ? 'choose' : state.phase;
+  if (state.phase !== 'paused') state.aiResumePhase = state.phase;
   state.phase = 'paused';
   questionEl.textContent = 'Пул заданий исчерпан. AI готовит новые вопросы — подожди…';
   setHint('Пул заданий исчерпан. AI генерирует новые вопросы — подожди…');
@@ -830,12 +887,14 @@ function triggerAiPause(bridge) {
         }
       }
       aiPauseActive = false;
+      // Perk overlay covers us — let the perk click handler resume phase.
+      if (state.perkActive) return;
       if (state.phase === 'paused') {
-        state.phase = state.pausedPhase || 'choose';
+        state.phase = state.aiResumePhase || 'choose';
         syncQuestionHud();
         setHint(`Новые задания подготовлены. ${bridgeControlsHint(activeBridge())}`);
       }
-      state.pausedPhase = null;
+      state.aiResumePhase = null;
     });
 }
 
@@ -1595,6 +1654,17 @@ function applyBridgeVariant(bridge, config = null) {
   bridge.birdCooldown = 0;
   bridge.rocks = [];
   bridge.landingGrace = 0;
+  bridge.tutorialStep = 0;
+  bridge.tutorialNoTilt = false;
+  bridge.tutorialNoAmplify = false;
+
+  if (TUTORIAL_BRIDGE_TYPES.has(bridge.type)) {
+    bridge.tutorialStep = TUTORIAL_SCRIPT.indexOf(bridge.type) + 1;
+    bridge.tutorialNoTilt = bridge.type === 'tutWalk';
+    bridge.tutorialNoAmplify = bridge.type !== 'tutJump';
+    bridge.category = 'обучение';
+    return;
+  }
 
   if (bridge.type === 'missingOne') {
     const indices = variant.missingSectionIndices || randomDeckSectionIndices(parts, 1);
@@ -1656,7 +1726,35 @@ function shuffle(items) {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
+function makeTutorialQuestion(bridge) {
+  if (bridge.type === 'tutWalk') {
+    return {
+      q: '2 + 2 = ? Снимай НЕВЕРНЫЕ грибы (подойди — они провалятся). Правильный оставляем.',
+      choices: ['5', '4'],
+      correctIndex: 1,
+      correctSet: new Set([1]),
+    };
+  }
+  if (bridge.type === 'tutBalance') {
+    return {
+      q: 'Сколько ног у паука? Снимай неверные. Каждый снятый гриб качает мост к оставшимся.',
+      choices: ['6', '8', '10', '12'],
+      correctIndex: 1,
+      correctSet: new Set([1]),
+    };
+  }
+  return {
+    q: 'Какого цвета небо днём? Сними 3 неверных. Когда останется один правильный — мост перекосит, встань на поднятый край и жми ПРОБЕЛ.',
+    choices: ['Синее', 'Зелёное', 'Красное', 'Жёлтое'],
+    correctIndex: 0,
+    correctSet: new Set([0]),
+  };
+}
+
 function makeQuestionForBridge(bridge) {
+  if (TUTORIAL_BRIDGE_TYPES.has(bridge.type)) {
+    return makeTutorialQuestion(bridge);
+  }
   if (!isQuestionBridge(bridge)) {
     const question = window.pickQuestion('mix', { floor: bridge.floor, type: bridge.type });
     question.correctSet = new Set([question.correctIndex]);
@@ -1700,7 +1798,8 @@ function makeQuestionForBridge(bridge) {
   } else if (bridge.type === 'anti') {
     question.q = `Анти-вопрос: сними все неправильные, правильный оставь. ${question.q}`;
   } else if (bridge.type === 'memory') {
-    question.q = `Запомни за 4 секунды: ${question.q}`;
+    const seconds = Math.max(1, Math.round(4 * runModMul('memoryTimerMul')));
+    question.q = `Запомни за ${seconds} ${seconds === 1 ? 'секунду' : seconds < 5 ? 'секунды' : 'секунд'}: ${question.q}`;
   }
 
   question.correctSet = correctSet;
@@ -1785,6 +1884,9 @@ function setupBridgeQuestion(bridge) {
   } else if (bridge.type === 'narrow') {
     slots = [-4.1, -1.4, 1.4, 4.1];
     zOffsets = [0, 0, 0, 0];
+  } else if (bridge.type === 'tutWalk') {
+    slots = [-2.5, 2.5];
+    zOffsets = [0, 0];
   }
 
   const anchorIndex = configuredWeights
@@ -1852,6 +1954,14 @@ function syncQuestionHud() {
 function startRound(options = {}) {
   const fromFloor = Math.max(1, Math.floor(options.fromFloor || 1));
   const resuming = Boolean(options.resumeCheckpoint);
+  if (resuming && state.runSeed) {
+    setRunSeed(state.runSeed);
+  } else {
+    state.runSeed = (Math.random() * 0xffffffff) >>> 0;
+    setRunSeed(state.runSeed);
+  }
+  state.perkActive = false;
+  state.aiResumePhase = null;
   for (let floor = Math.max(1, fromFloor - 2); floor < fromFloor + VISIBLE_BRIDGES; floor++) {
     ensureBridge(floor);
   }
@@ -1898,10 +2008,17 @@ function startRound(options = {}) {
   updateHud();
   updateFloorMarkers();
   updateMetaUi();
-  const intro = fromFloor === 1
-    ? 'Сначала спокойно: снимай неверные грибы, правильный оставляй. Первые мосты мягче и учат базу.'
-    : `Продолжение с чекпоинта: мост ${fromFloor}.`;
-  setHint(`${intro} ${bridgeControlsHint(activeBridge())}`);
+  const startedBridge = activeBridge();
+  let intro;
+  if (startedBridge.tutorialStep > 0) {
+    intro = 'Обучение. Главное правило: снимай НЕВЕРНЫЕ ответы — правильный должен остаться. Подойди к грибу — он провалится.';
+    setCoach('Шаг 1 из 3: сними неверный гриб', 'good');
+  } else if (fromFloor === 1) {
+    intro = 'Сначала спокойно: снимай неверные грибы, правильный оставляй. Первые мосты мягче и учат базу.';
+  } else {
+    intro = `Продолжение с чекпоинта: мост ${fromFloor}.`;
+  }
+  setHint(`${intro} ${bridgeControlsHint(startedBridge)}`);
 }
 
 function updateHud() {
@@ -1982,6 +2099,15 @@ function removeWeight(w) {
       setHint('Этот якорный гриб правильный: его надо оставить.');
     }
   } else {
+    if (bridge.tutorialNoAmplify && w.isCorrect) {
+      // Tutorial: don't let the player softlock the bridge by removing the correct mushroom.
+      bridge.tiltVel = 0;
+      bridge.tilt = 0;
+      state.pickupGrace = 0.6;
+      setHint('Правильный гриб надо ОСТАВЛЯТЬ. Снимай только НЕВЕРНЫЕ.');
+      setCoach('Снимай НЕВЕРНЫЕ грибы', 'warn');
+      return;
+    }
     if (bridge.type === 'variedMass' && !w.isCorrect) {
       const nextIdx = bridge.massOrder.find(idx => {
         const item = bridge.weights.find(candidate => candidate.idx === idx);
@@ -2000,9 +2126,13 @@ function removeWeight(w) {
     if (w.isCorrect) {
       bridge.mistakes = (bridge.mistakes || 0) + 1;
       state.bridgeMistakes = bridge.mistakes;
-      bridge.amplify = true;
-      state.amplify = true;
-      setHint('Это был правильный ответ! Оставшиеся тянут сильнее…');
+      if (!bridge.tutorialNoAmplify) {
+        bridge.amplify = true;
+        state.amplify = true;
+        setHint('Это был правильный ответ! Оставшиеся тянут сильнее…');
+      } else {
+        setHint('Это был правильный гриб — на обучении я ничего не делаю, но помни: его надо ОСТАВЛЯТЬ.');
+      }
     }
   }
 
@@ -2350,17 +2480,26 @@ function awardBridge(bridge) {
   if (bridge.scored) return;
   bridge.scored = true;
   bridge.done = true;
+  const tutorialClear = bridge.tutorialStep > 0;
   const grade = bridgeGrade(bridge);
-  const baseScore = 100 + state.streak * 25 + grade.scoreBonus;
+  const baseScore = tutorialClear ? 30 : 100 + state.streak * 25 + grade.scoreBonus;
   state.score += Math.round(baseScore * runModMul('scoreMul'));
-  state.runShards += grantShards(grade.shards);
-  state.lastGrade = grade.label;
+  if (!tutorialClear) state.runShards += grantShards(grade.shards);
+  state.lastGrade = tutorialClear ? '' : grade.label;
   state.streak += 1;
   state.best = Math.max(state.best, state.streak);
   profile.bestFloor = Math.max(profile.bestFloor || 1, bridge.floor + 1);
   profile.bestStreak = Math.max(profile.bestStreak || 0, state.best);
+  if (tutorialClear && bridge.tutorialStep === TUTORIAL_SCRIPT.length && !profile.tutorialDone) {
+    profile.tutorialDone = true;
+    bridgeTypeCache.clear();
+    setCoach('Обучение пройдено! Дальше — настоящие мосты.', 'good');
+  } else if (!tutorialClear) {
+    setCoach(`Оценка ${grade.label}: +${grade.shards} оск.`, grade.label === 'S' || grade.label === 'A' ? 'good' : '');
+  } else {
+    setCoach('Шаг обучения пройден.', 'good');
+  }
   saveProfile();
-  setCoach(`Оценка ${grade.label}: +${grade.shards} оск.`, grade.label === 'S' || grade.label === 'A' ? 'good' : '');
   Sound && Sound.good && Sound.good();
   updateHud();
   updateMetaUi();
@@ -2428,7 +2567,18 @@ function landOnNextBridge(landingLocalX) {
     return;
   }
   if (state.phase !== 'paused') {
-    setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
+    if (targetBridge.tutorialStep > 0) {
+      const step = targetBridge.tutorialStep;
+      const lines = {
+        1: 'Шаг 1 из 3: подойди к неверному грибу — он провалится. Правильный оставляем.',
+        2: 'Шаг 2 из 3: сними 3 неверных. Каждый снятый гриб качает мост в сторону оставшихся.',
+        3: 'Шаг 3 из 3: сними 3 неверных. Когда останется один правильный — мост перекосит. Встань на поднятый край и жми ПРОБЕЛ.',
+      };
+      setCoach(`Шаг ${step} из ${TUTORIAL_SCRIPT.length}`, 'good');
+      setHint(`${lines[step] || ''} ${bridgeControlsHint(targetBridge)}`);
+    } else {
+      setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
+    }
   }
 }
 
@@ -2466,6 +2616,14 @@ function updateBridgePhysics(bridge, dt, isActive) {
   } else {
     bridge.driftT += dt;
     bridge.group.position.x = Math.sin(bridge.driftT * bridge.driftFreq) * bridge.driftAmp;
+  }
+
+  if (bridge.tutorialNoTilt) {
+    bridge.tilt = 0;
+    bridge.tiltVel = 0;
+    bridge.group.position.y = bridge.baseY;
+    bridge.group.rotation.z = 0;
+    return;
   }
 
   const stats = bridgeWeightStats(bridge);
@@ -2906,7 +3064,13 @@ function setBootStartBusy(button, busy) {
 
 async function prepareQuizForStart() {
   if (typeof window.prepareMostyQuiz !== 'function') return;
-  await window.prepareMostyQuiz({ floors: VISIBLE_BRIDGES, startFloor: 1 });
+  try {
+    await window.prepareMostyQuiz({ floors: VISIBLE_BRIDGES, startFloor: 1 });
+  } catch (err) {
+    // Pool prep failed — fall back to the legacy in-file question bank,
+    // pickQuestion already handles that path. Don't block the start button.
+    console.warn('AI quiz prepare failed, falling back to local bank:', err);
+  }
 }
 
 function showRendererError() {
