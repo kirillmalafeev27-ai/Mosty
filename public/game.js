@@ -12,10 +12,10 @@ import * as THREE from 'three';
 
 // -------- DOM refs --------
 const $ = id => document.getElementById(id);
-const roundEl = $('round'), scoreEl = $('score'), streakEl = $('streak');
+const roundEl = $('round'), scoreEl = $('score'), streakEl = $('streak'), shardsEl = $('shards');
 const questionEl = $('question'), hintEl = $('hint');
 const tiltNeedle = $('tilt-needle'), phaseNeedle = $('phase-needle');
-const overlay = $('overlay'), ovTitle = $('ov-title'), ovBody = $('ov-body');
+const overlay = $('overlay'), ovTitle = $('ov-title'), ovBody = $('ov-body'), ovRestart = $('ov-restart');
 const boot = $('boot'), touchControls = $('touch-controls');
 if (roundEl.previousElementSibling) roundEl.previousElementSibling.textContent = 'Мост';
 
@@ -108,8 +108,220 @@ const BRIDGE_TYPE_LABELS = {
   rockfall: 'камнепад',
 };
 
+const EARLY_BRIDGE_SCRIPT = ['plain', 'biased', 'rocking', 'variedMass', 'plain'];
+const TIER_EASY = ['plain', 'biased', 'rocking', 'variedMass'];
+const TIER_MID = ['plain', 'biased', 'rocking', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne'];
+const TIER_HARD = ['plain', 'rocking', 'biased', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne', 'memory', 'anti', 'sequence', 'anchor', 'bird', 'narrow', 'rockfall', 'missingTwoPairs'];
+const CHECKPOINT_INTERVAL = 3;
+const PERK_OFFER_FLOORS = new Set([2, 4, 7, 10, 13, 16, 20, 24, 28]);
+const PROFILE_KEY = 'mosty.roguelike.profile.v1';
+
+const SHOP_UPGRADES = [
+  {
+    id: 'grip',
+    name: 'Сапоги с шипами',
+    desc: 'Меньше сносит на наклонном мосту.',
+    max: 3,
+    costs: [30, 70, 140],
+  },
+  {
+    id: 'reach',
+    name: 'Длинная рука',
+    desc: 'Можно снимать грибы чуть дальше от себя.',
+    max: 3,
+    costs: [35, 85, 160],
+  },
+  {
+    id: 'safety',
+    name: 'Страховочный канат',
+    desc: 'Дополнительное спасение от падения в каждом забеге.',
+    max: 2,
+    costs: [55, 130],
+  },
+  {
+    id: 'choice',
+    name: 'Лавка реликвий',
+    desc: 'Иногда показывает 4 реликвии вместо 3.',
+    max: 1,
+    costs: [120],
+  },
+];
+
+const PERKS = [
+  {
+    id: 'catPaws',
+    name: 'Кошачьи лапы',
+    desc: 'Сцепление с мостом сильно выше. Хорошо против наклона и ветра.',
+    mods: { gripMul: 1.65 },
+  },
+  {
+    id: 'longArm',
+    name: 'Длинная рука',
+    desc: 'Снимаешь грибы на расстоянии, меньше бегая по краям.',
+    mods: { pickRadiusAdd: 0.55 },
+  },
+  {
+    id: 'ghost',
+    name: 'Призрачный шаг',
+    desc: 'Ты почти не раскачиваешь мост, но хуже работаешь как противовес.',
+    mods: { playerMassMul: 0.38, loadFollowMul: 0.55 },
+  },
+  {
+    id: 'counterweight',
+    name: 'Живой противовес',
+    desc: 'Твой вес сильнее влияет на мост. Опасно, зато можно спасать перекос телом.',
+    mods: { playerMassMul: 1.55, gripMul: 1.12 },
+  },
+  {
+    id: 'quietStep',
+    name: 'Тихий шаг',
+    desc: 'Мост медленнее реагирует на твои перебежки.',
+    mods: { loadFollowMul: 0.35 },
+  },
+  {
+    id: 'sprinter',
+    name: 'Спринтер',
+    desc: 'Бежишь быстрее. Сложнее, но можно вырывать темп.',
+    mods: { walkSpeedMul: 1.25, scoreMul: 1.08 },
+  },
+  {
+    id: 'antimagnet',
+    name: 'Антимагнит',
+    desc: 'Если случайно снял правильный гриб, оставшиеся тянут не так яростно.',
+    mods: { amplifyWeightMul: 0.62 },
+  },
+  {
+    id: 'pendulum',
+    name: 'Маятник',
+    desc: 'Мост качается шире и помогает прыгать выше, но требует чувства ритма.',
+    mods: { springAdd: -0.75, dampAdd: -0.28, jumpReachAdd: 0.65 },
+  },
+  {
+    id: 'brakes',
+    name: 'Тормоза',
+    desc: 'Мост быстрее гасит раскачку. Надежно, но прыжки надо ловить точнее.',
+    mods: { springAdd: 0.9, dampAdd: 0.2 },
+  },
+  {
+    id: 'echo',
+    name: 'Эхо вопроса',
+    desc: 'Memory-мосты держат вопрос дольше, а птица терпит паузу.',
+    mods: { memoryTimerMul: 1.8, birdPatienceAdd: 1.6 },
+  },
+  {
+    id: 'weathercoat',
+    name: 'Плащ ветра',
+    desc: 'Ветер слабее, а на льду можно сопротивляться скольжению.',
+    mods: { windPushMul: 0.58, iceUphill: true },
+  },
+  {
+    id: 'airStep',
+    name: 'Воздушный шаг',
+    desc: 'Вертикальный прыжок достает выше. Хорошо для поздних мостов.',
+    mods: { jumpReachAdd: 0.9 },
+  },
+];
+
+function deterministicPoolIndex(floor, pool) {
+  return Math.abs((floor * 9301 + Math.floor(floor / 3) * 49297 + 233) % pool.length);
+}
+
 function bridgeTypeFor(floor) {
-  return BRIDGE_TYPES[(floor - 1) % BRIDGE_TYPES.length];
+  if (floor <= EARLY_BRIDGE_SCRIPT.length) return EARLY_BRIDGE_SCRIPT[floor - 1];
+  const pool = floor <= 8 ? TIER_EASY : floor <= 18 ? TIER_MID : TIER_HARD;
+  return pool[deterministicPoolIndex(floor, pool)];
+}
+
+function defaultProfile() {
+  return {
+    shards: 0,
+    totalShards: 0,
+    bestFloor: 1,
+    bestStreak: 0,
+    runs: 0,
+    upgrades: { grip: 0, reach: 0, safety: 0, choice: 0 },
+  };
+}
+
+function loadProfile() {
+  const base = defaultProfile();
+  try {
+    const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return base;
+    return {
+      ...base,
+      ...raw,
+      upgrades: { ...base.upgrades, ...(raw.upgrades || {}) },
+    };
+  } catch (_) {
+    return base;
+  }
+}
+
+let profile = loadProfile();
+
+function saveProfile() {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch (_) {}
+}
+
+function upgradeLevel(id) {
+  return Math.max(0, Number(profile.upgrades?.[id]) || 0);
+}
+
+function upgradeCost(upgrade) {
+  const level = upgradeLevel(upgrade.id);
+  return level >= upgrade.max ? null : upgrade.costs[level];
+}
+
+function buyUpgrade(id) {
+  const upgrade = SHOP_UPGRADES.find(item => item.id === id);
+  if (!upgrade) return;
+  const cost = upgradeCost(upgrade);
+  if (cost === null || profile.shards < cost) return;
+  profile.shards -= cost;
+  profile.upgrades[upgrade.id] = upgradeLevel(upgrade.id) + 1;
+  saveProfile();
+  updateMetaUi();
+  updateHud();
+}
+
+function upgradeAdd(key) {
+  if (key === 'pickRadiusAdd') return upgradeLevel('reach') * 0.15;
+  if (key === 'rescueChargesAdd') return upgradeLevel('safety');
+  return 0;
+}
+
+function upgradeMul(key) {
+  if (key === 'gripMul') return 1 + upgradeLevel('grip') * 0.16;
+  return 1;
+}
+
+function runModAdd(key) {
+  let value = upgradeAdd(key);
+  for (const perkId of state.perks || []) {
+    const perk = PERKS.find(item => item.id === perkId);
+    value += Number(perk?.mods?.[key]) || 0;
+  }
+  return value;
+}
+
+function runModMul(key) {
+  let value = upgradeMul(key);
+  for (const perkId of state.perks || []) {
+    const perk = PERKS.find(item => item.id === perkId);
+    const mod = perk?.mods?.[key];
+    if (Number.isFinite(mod)) value *= mod;
+  }
+  return value;
+}
+
+function runModFlag(key) {
+  return (state.perks || []).some(perkId => {
+    const perk = PERKS.find(item => item.id === perkId);
+    return perk?.mods?.[key] === true;
+  });
 }
 
 function isQuestionBridge(bridge) {
@@ -127,9 +339,24 @@ function floorBaseY(floor = state.round) {
 // -------- Game state --------
 const state = {
   round: 1, score: 0, streak: 0, best: 0,
-  phase: 'idle', // 'idle' | 'choose' | 'jump' | 'launching' | 'win' | 'over'
+  phase: 'idle', // 'idle' | 'choose' | 'jump' | 'paused' | 'win' | 'over'
   question: null,
   weights: [],
+  perks: [],
+  offeredPerkFloors: [],
+  checkpointFloor: 1,
+  checkpointScore: 0,
+  checkpointStreak: 0,
+  checkpointPerks: [],
+  checkpointOfferFloors: [],
+  runShards: 0,
+  runRescues: 0,
+  restartMode: 'new',
+  bridgeStartedAt: 0,
+  bridgeMaxTilt: 0,
+  bridgeMistakes: 0,
+  lastGrade: '',
+  spacePromptReady: false,
   amplify: false,
   tilt: 0, tiltVel: 0,
   playerX: 0, playerZ: 0,
@@ -159,6 +386,168 @@ const state = {
   upperLocalX: 0,
   upperLocalZ: 0,
 };
+
+const coachEl = document.createElement('div');
+coachEl.id = 'coach';
+coachEl.hidden = true;
+document.body.appendChild(coachEl);
+
+const overlayExtra = document.createElement('div');
+overlayExtra.id = 'overlay-extra';
+overlayExtra.className = 'overlay-extra';
+if (ovBody?.parentElement) ovBody.parentElement.insertBefore(overlayExtra, ovRestart);
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function setCoach(text = '', tone = '') {
+  coachEl.textContent = text;
+  coachEl.className = tone ? `coach ${tone}` : 'coach';
+  coachEl.hidden = !text;
+}
+
+function clearOverlayExtra() {
+  overlayExtra.innerHTML = '';
+  overlayExtra.hidden = true;
+  if (ovRestart) ovRestart.hidden = false;
+}
+
+function isCheckpointFloor(floor) {
+  return floor > 1 && (floor - 1) % CHECKPOINT_INTERVAL === 0;
+}
+
+function startingRescueCharges() {
+  return 1 + runModAdd('rescueChargesAdd');
+}
+
+function effectivePlayerMass() {
+  return PLAYER_MASS * runModMul('playerMassMul');
+}
+
+function effectivePickRadius(bridge) {
+  const base = bridge.type === 'narrow' ? 0.72 : PICK_RADIUS;
+  return base + runModAdd('pickRadiusAdd') + earlyMercyForFloor() * 0.18;
+}
+
+function earlyMercyForFloor(floor = state.round) {
+  if (floor <= 3) return 1;
+  if (floor <= 6) return 0.45;
+  return 0;
+}
+
+function effectiveFailTilt() {
+  return FAIL_TILT + earlyMercyForFloor() * 0.34;
+}
+
+function effectiveJumpReach(bridge) {
+  return JUMP_REACH + (bridge.longJump ? 0.7 : 0) + runModAdd('jumpReachAdd') + earlyMercyForFloor() * 0.35;
+}
+
+function effectiveLaunchLift() {
+  return Math.max(0.18, MIN_LAUNCH_LIFT - earlyMercyForFloor() * 0.12);
+}
+
+function effectiveLaunchEdgeX() {
+  return Math.max(1.35, MIN_LAUNCH_EDGE_X - earlyMercyForFloor() * 0.45);
+}
+
+function checkpointSnapshot() {
+  state.checkpointFloor = state.round;
+  state.checkpointScore = state.score;
+  state.checkpointStreak = state.streak;
+  state.checkpointPerks = [...state.perks];
+  state.checkpointOfferFloors = [...state.offeredPerkFloors];
+}
+
+function markProfileProgress() {
+  profile.bestFloor = Math.max(profile.bestFloor || 1, state.round);
+  profile.bestStreak = Math.max(profile.bestStreak || 0, state.best || 0);
+  saveProfile();
+}
+
+function grantShards(amount) {
+  const gained = Math.max(0, Math.floor(amount));
+  if (!gained) return 0;
+  profile.shards += gained;
+  profile.totalShards += gained;
+  saveProfile();
+  updateMetaUi();
+  updateHud();
+  return gained;
+}
+
+function availablePerks() {
+  const taken = new Set(state.perks);
+  return PERKS.filter(perk => !taken.has(perk.id));
+}
+
+function choosePerkOptions(count) {
+  const pool = shuffle(availablePerks());
+  return pool.slice(0, Math.min(count, pool.length));
+}
+
+function shouldOfferPerkOnFloor(floor) {
+  return PERK_OFFER_FLOORS.has(floor) && !state.offeredPerkFloors.includes(floor) && availablePerks().length > 0;
+}
+
+function showPerkChoice() {
+  const count = 3 + upgradeLevel('choice');
+  const choices = choosePerkOptions(count);
+  if (!choices.length) return false;
+  state.phase = 'paused';
+  state.pausedPhase = 'choose';
+  state.offeredPerkFloors.push(state.round);
+  overlay.hidden = false;
+  ovTitle.textContent = 'Реликвия забега';
+  ovBody.textContent = 'Выбери одну штуку. Она меняет физику мостов до конца этой попытки.';
+  overlayExtra.hidden = false;
+  overlayExtra.innerHTML = `
+    <div class="perk-choice-grid">
+      ${choices.map(perk => `
+        <button class="perk-card" type="button" data-perk="${perk.id}">
+          <span class="perk-name">${escapeHtml(perk.name)}</span>
+          <span class="perk-desc">${escapeHtml(perk.desc)}</span>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  if (ovRestart) ovRestart.hidden = true;
+  setCoach('');
+  return true;
+}
+
+overlayExtra.addEventListener('click', event => {
+  const button = event.target.closest('[data-perk]');
+  if (!button) return;
+  const perk = PERKS.find(item => item.id === button.dataset.perk);
+  if (!perk) return;
+  state.perks.push(perk.id);
+  clearOverlayExtra();
+  overlay.hidden = true;
+  state.phase = state.pausedPhase || 'choose';
+  state.pausedPhase = null;
+  setHint(`Реликвия взята: ${perk.name}. ${bridgeControlsHint(activeBridge())}`);
+  updateMetaUi();
+});
+
+function bridgeGrade(bridge) {
+  const elapsed = bridge.startedAt ? (performance.now() - bridge.startedAt) / 1000 : 999;
+  const maxTilt = bridge.maxAbsTilt ?? state.bridgeMaxTilt ?? 0;
+  const mistakes = bridge.mistakes ?? 0;
+  let points = 0;
+  if (elapsed <= 18) points += 1;
+  if (maxTilt <= 0.52) points += 1;
+  if (mistakes === 0) points += 1;
+  if (points >= 3) return { label: 'S', scoreBonus: 75, shards: 4 };
+  if (points === 2) return { label: 'A', scoreBonus: 45, shards: 3 };
+  if (points === 1) return { label: 'B', scoreBonus: 20, shards: 2 };
+  return { label: 'C', scoreBonus: 0, shards: 1 };
+}
 
 // -------- Three.js setup --------
 const root = $('scene-root');
@@ -981,6 +1370,66 @@ function initCoopUi() {
 }
 initCoopUi();
 
+function initMetaUi() {
+  const panel = boot && boot.firstElementChild;
+  const startBtn = $('start');
+  if (!panel || !startBtn || $('meta-panel')) return;
+  const el = document.createElement('div');
+  el.id = 'meta-panel';
+  el.className = 'meta-panel';
+  el.innerHTML = `
+    <div class="meta-head">
+      <div>
+        <div class="meta-kicker">Между падениями</div>
+        <div class="meta-title">Постоянные улучшения</div>
+      </div>
+      <div class="meta-bank"><span id="meta-shards">0</span> оск.</div>
+    </div>
+    <div id="shop-grid" class="shop-grid"></div>
+    <div id="run-build" class="run-build"></div>
+  `;
+  panel.insertBefore(el, startBtn);
+  el.addEventListener('click', event => {
+    const button = event.target.closest('[data-buy-upgrade]');
+    if (!button) return;
+    buyUpgrade(button.dataset.buyUpgrade);
+  });
+  updateMetaUi();
+}
+
+function updateMetaUi() {
+  if (shardsEl) shardsEl.textContent = profile.shards;
+  const metaShards = $('meta-shards');
+  if (metaShards) metaShards.textContent = profile.shards;
+  const grid = $('shop-grid');
+  if (grid) {
+    grid.innerHTML = SHOP_UPGRADES.map(upgrade => {
+      const level = upgradeLevel(upgrade.id);
+      const cost = upgradeCost(upgrade);
+      const maxed = cost === null;
+      const disabled = maxed || profile.shards < cost;
+      return `
+        <button class="shop-card" type="button" data-buy-upgrade="${upgrade.id}" ${disabled ? 'disabled' : ''}>
+          <span class="shop-name">${escapeHtml(upgrade.name)} <b>${level}/${upgrade.max}</b></span>
+          <span class="shop-desc">${escapeHtml(upgrade.desc)}</span>
+          <span class="shop-cost">${maxed ? 'куплено' : `${cost} оск.`}</span>
+        </button>
+      `;
+    }).join('');
+  }
+  const build = $('run-build');
+  if (build) {
+    const names = state.perks
+      .map(id => PERKS.find(perk => perk.id === id)?.name)
+      .filter(Boolean);
+    build.textContent = names.length
+      ? `Реликвии забега: ${names.join(' + ')}`
+      : `Рекорд: мост ${profile.bestFloor || 1}. В каждом забеге есть 1 бесплатное спасение.`;
+  }
+}
+
+initMetaUi();
+
 // -------- Resize --------
 addEventListener('resize', () => {
   updateTouchDeviceClass();
@@ -1184,7 +1633,7 @@ function applyBridgeVariant(bridge, config = null) {
     bridge.mode = 'anti';
   } else if (bridge.type === 'memory') {
     bridge.mode = 'memory';
-    bridge.memoryTimer = 4;
+    bridge.memoryTimer = 4 * runModMul('memoryTimerMul');
   } else if (bridge.type === 'pairs') {
     bridge.mode = 'pairs';
   } else if (bridge.type === 'bird') {
@@ -1388,14 +1837,42 @@ function syncQuestionHud() {
   state.question = bridge.question;
   state.weights = bridge.weights;
   state.amplify = bridge.amplify;
+  bridge.startedAt = performance.now();
+  bridge.maxAbsTilt = 0;
+  bridge.mistakes = 0;
+  state.bridgeStartedAt = bridge.startedAt;
+  state.bridgeMaxTilt = 0;
+  state.bridgeMistakes = 0;
+  state.spacePromptReady = false;
   const label = BRIDGE_TYPE_LABELS[bridge.type] || bridge.type;
   questionEl.textContent = `Мост ${state.round}: ${label} [${bridge.category === 'question' ? 'задание' : 'препятствие'}]. ${bridge.question.q}`;
   if (window.playQuizAudio) window.playQuizAudio(bridge.question);
 }
 
-function startRound() {
-  for (const bridge of bridges) setupBridgeQuestion(bridge);
-  state.round = 1;
+function startRound(options = {}) {
+  const fromFloor = Math.max(1, Math.floor(options.fromFloor || 1));
+  const resuming = Boolean(options.resumeCheckpoint);
+  for (let floor = Math.max(1, fromFloor - 2); floor < fromFloor + VISIBLE_BRIDGES; floor++) {
+    ensureBridge(floor);
+  }
+  for (const bridge of bridges) {
+    if (bridge.floor >= Math.max(1, fromFloor - 2) && bridge.floor < fromFloor + VISIBLE_BRIDGES) {
+      setupBridgeQuestion(bridge);
+    }
+  }
+  state.round = fromFloor;
+  state.score = resuming ? state.checkpointScore : 0;
+  state.streak = resuming ? state.checkpointStreak : 0;
+  state.perks = resuming ? [...state.checkpointPerks] : [];
+  state.offeredPerkFloors = resuming ? [...state.checkpointOfferFloors] : [];
+  state.runShards = resuming ? state.runShards : 0;
+  state.runRescues = startingRescueCharges();
+  state.restartMode = 'new';
+  state.best = Math.max(state.best, profile.bestStreak || 0);
+  if (!resuming) {
+    profile.runs += 1;
+    saveProfile();
+  }
   state.amplify = false;
   state.tilt = 0; state.tiltVel = 0;
   state.playerX = 0; state.playerZ = 0;
@@ -1412,17 +1889,26 @@ function startRound() {
   state.resetting = false;
   state.onUpper = false;
   overlay.hidden = true;
+  clearOverlayExtra();
+  setCoach('');
+  checkpointSnapshot();
 
   syncQuestionHud();
+  pruneOldBridges();
   updateHud();
   updateFloorMarkers();
-  setHint(`Сними три неверных ответа. ${bridgeControlsHint(activeBridge())}`);
+  updateMetaUi();
+  const intro = fromFloor === 1
+    ? 'Сначала спокойно: снимай неверные грибы, правильный оставляй. Первые мосты мягче и учат базу.'
+    : `Продолжение с чекпоинта: мост ${fromFloor}.`;
+  setHint(`${intro} ${bridgeControlsHint(activeBridge())}`);
 }
 
 function updateHud() {
   roundEl.textContent = state.round;
   scoreEl.textContent = state.score;
   streakEl.textContent = state.streak;
+  if (shardsEl) shardsEl.textContent = profile.shards;
 }
 
 function updateFloorMarkers(completedCurrent = false) {
@@ -1456,7 +1942,7 @@ function maybePickup() {
   if (state.phase !== 'choose') return;
   if (state.pickupGrace > 0) return;
   const bridge = activeBridge();
-  const pickRadius = bridge.type === 'narrow' ? 0.72 : PICK_RADIUS;
+  const pickRadius = effectivePickRadius(bridge);
   for (const w of state.weights) {
     if (w.removed) continue;
     const dx = state.playerX - w.slot;
@@ -1476,6 +1962,8 @@ function removeWeight(w) {
   if (bridge.mode === 'sequence') {
     const expected = bridge.sequenceOrder[bridge.sequenceIndex];
     if (w.text !== expected) {
+      bridge.mistakes = (bridge.mistakes || 0) + 1;
+      state.bridgeMistakes = bridge.mistakes;
       bridge.tiltVel += Math.sign(w.slot || 1) * 1.2;
       setHint(`Ошибка в цепочке. Сейчас нужен: ${expected}. Мост дернуло.`);
       return;
@@ -1500,6 +1988,8 @@ function removeWeight(w) {
         return item && !item.removed;
       });
       if (w.idx !== nextIdx) {
+        bridge.mistakes = (bridge.mistakes || 0) + 1;
+        state.bridgeMistakes = bridge.mistakes;
         bridge.tiltVel += Math.sign(w.slot || 1) * 1.0;
         setHint('Не тот порядок масс: сначала снимай меньшие грибы. Мост наказал наклоном.');
         return;
@@ -1508,6 +1998,8 @@ function removeWeight(w) {
 
     w.removed = true; w.fallVy = 0;
     if (w.isCorrect) {
+      bridge.mistakes = (bridge.mistakes || 0) + 1;
+      state.bridgeMistakes = bridge.mistakes;
       bridge.amplify = true;
       state.amplify = true;
       setHint('Это был правильный ответ! Оставшиеся тянут сильнее…');
@@ -1750,8 +2242,8 @@ function tryJump() {
   const playerWorldY = launchSurfaceY + PLAYER_HEIGHT;
   const gap = upperY - playerWorldY;
   const launchLift = launchSurfaceY - (launchBridge.baseY + 0.15);
-  const raisedEdgeLaunch = Math.abs(state.playerX) >= MIN_LAUNCH_EDGE_X && launchLift >= MIN_LAUNCH_LIFT;
-  const jumpReach = JUMP_REACH + (launchBridge.longJump ? 0.7 : 0);
+  const raisedEdgeLaunch = Math.abs(state.playerX) >= effectiveLaunchEdgeX() && launchLift >= effectiveLaunchLift();
+  const jumpReach = effectiveJumpReach(launchBridge);
   const reachable = raisedEdgeLaunch && gap > 0 && gap < jumpReach;
   state.jumping = true;
   state.jumpMode = 'upper';
@@ -1796,28 +2288,82 @@ function localXForWorldXOnBridge(bridge, worldX) {
 }
 
 // -------- Failure / success --------
+function resetToSafeSpot(reason) {
+  const bridge = activeBridge();
+  state.runRescues = Math.max(0, state.runRescues - 1);
+  state.onBridge = true;
+  state.onUpper = false;
+  state.jumping = false;
+  state.jumpMode = 'none';
+  state.launchSuccess = false;
+  state.playerX = safeDeckXNear(bridge, 0, 0);
+  state.playerZ = 0;
+  state.playerY = 0;
+  state.playerVY = 0;
+  state.playerVX = 0;
+  state.playerVZ = 0;
+  state.slideVX = 0;
+  state.pickupGrace = 0.6;
+  state.phase = bridgeReadyToJump(bridge) ? 'jump' : 'choose';
+  bridge.tilt = THREE.MathUtils.clamp(bridge.tilt, -0.18, 0.18);
+  bridge.tiltVel *= 0.15;
+  bridge.playerLoadX = state.playerX;
+  bridge.group.rotation.z = -bridge.tilt;
+  setCoach(`Спасение! Осталось: ${state.runRescues}`, 'warn');
+  setHint(`${reason}. Канат вернул тебя на мост. Дыши, продолжай.`);
+  Sound && Sound.good && Sound.good();
+}
+
+function showRunEnd(reason, gained) {
+  const checkpointText = state.restartMode === 'checkpoint'
+    ? `Кнопка продолжит с чекпоинта: мост ${state.checkpointFloor}.`
+    : 'До первого чекпоинта нужно добраться до 4-го моста.';
+  ovTitle.textContent = 'Падение';
+  ovBody.textContent = `${reason}. Мост: ${state.round}. Очки: ${state.score}. Осколки за попытку: +${gained}. Лучший мост: ${profile.bestFloor || 1}. ${checkpointText}`;
+  if (ovRestart) ovRestart.textContent = state.restartMode === 'checkpoint' ? 'С чекпоинта' : 'Новый забег';
+  clearOverlayExtra();
+  overlay.hidden = false;
+}
+
 function fail(reason) {
   if (state.phase === 'over' || state.phase === 'win') return;
+  if (state.runRescues > 0) {
+    resetToSafeSpot(reason);
+    return;
+  }
   state.phase = 'over';
   state.best = Math.max(state.best, state.streak);
+  const reached = Math.max(state.round, profile.bestFloor || 1);
+  profile.bestFloor = reached;
+  profile.bestStreak = Math.max(profile.bestStreak || 0, state.best);
+  const gained = grantShards(Math.max(3, Math.floor(state.round * 1.4) + Math.floor(state.score / 350)));
+  state.restartMode = state.checkpointFloor > 1 && state.round >= state.checkpointFloor ? 'checkpoint' : 'new';
   state.streak = 0;
   Sound && Sound.crash && Sound.crash();
-  setTimeout(() => {
-    ovTitle.textContent = 'Соскользнул';
-    ovBody.textContent = `${reason}. Очки: ${state.score}. Лучшая серия: ${state.best}.`;
-    overlay.hidden = false;
-  }, 700);
+  saveProfile();
+  updateMetaUi();
+  updateHud();
+  setTimeout(() => showRunEnd(reason, gained), 700);
 }
 
 function awardBridge(bridge) {
   if (bridge.scored) return;
   bridge.scored = true;
   bridge.done = true;
-  state.score += 100 + state.streak * 25;
+  const grade = bridgeGrade(bridge);
+  const baseScore = 100 + state.streak * 25 + grade.scoreBonus;
+  state.score += Math.round(baseScore * runModMul('scoreMul'));
+  state.runShards += grantShards(grade.shards);
+  state.lastGrade = grade.label;
   state.streak += 1;
   state.best = Math.max(state.best, state.streak);
+  profile.bestFloor = Math.max(profile.bestFloor || 1, bridge.floor + 1);
+  profile.bestStreak = Math.max(profile.bestStreak || 0, state.best);
+  saveProfile();
+  setCoach(`Оценка ${grade.label}: +${grade.shards} оск.`, grade.label === 'S' || grade.label === 'A' ? 'good' : '');
   Sound && Sound.good && Sound.good();
   updateHud();
+  updateMetaUi();
   updateFloorMarkers();
 }
 
@@ -1826,9 +2372,13 @@ function finishTower() {
   awardBridge(activeBridge());
   state.phase = 'win';
   setHint('Башня из мостов пройдена! Все задания закрыты.');
+  const bonus = grantShards(25 + state.streak * 2);
+  markProfileProgress();
   setTimeout(() => {
     ovTitle.textContent = 'Все мосты пройдены';
-    ovBody.textContent = `Финальный счет: ${state.score}. Серия: ${state.streak}.`;
+    ovBody.textContent = `Финальный счет: ${state.score}. Серия: ${state.streak}. Бонус башни: +${bonus} осколков.`;
+    if (ovRestart) ovRestart.textContent = 'Новый забег';
+    clearOverlayExtra();
     overlay.hidden = false;
   }, 700);
 }
@@ -1868,6 +2418,15 @@ function landOnNextBridge(landingLocalX) {
   pruneOldBridges();
   updateHud();
   updateFloorMarkers();
+  markProfileProgress();
+  if (isCheckpointFloor(state.round)) {
+    checkpointSnapshot();
+    setCoach(`Чекпоинт: мост ${state.round}`, 'good');
+  }
+  if (shouldOfferPerkOnFloor(state.round) && showPerkChoice()) {
+    updateMetaUi();
+    return;
+  }
   if (state.phase !== 'paused') {
     setHint(`Ты на следующем мосту. Он продолжает качаться — снимай неверные ответы. ${bridgeControlsHint(targetBridge)}`);
   }
@@ -1892,7 +2451,7 @@ function bridgeWeightStats(bridge) {
   for (const w of bridge.weights) {
     if (w.removed) continue;
     let m = w.mass || 1;
-    if (bridge.amplify && !w.isCorrect) m = 3;
+    if (bridge.amplify && !w.isCorrect) m = 3 * runModMul('amplifyWeightMul');
     imbalance += w.slot * m;
     loadSpan += Math.abs(w.slot) * m;
   }
@@ -1913,10 +2472,10 @@ function updateBridgePhysics(bridge, dt, isActive) {
   let imbalance = stats.imbalance;
 
   if (isActive && state.onBridge && !state.jumping) {
-    const loadFollow = 1 - Math.exp(-PLAYER_LOAD_FOLLOW_RATE * dt);
+    const loadFollow = 1 - Math.exp(-PLAYER_LOAD_FOLLOW_RATE * runModMul('loadFollowMul') * dt);
     bridge.playerLoadX += (state.playerX - bridge.playerLoadX) * loadFollow;
     state.playerLoadX = bridge.playerLoadX;
-    imbalance += bridge.playerLoadX * PLAYER_MASS;
+    imbalance += bridge.playerLoadX * effectivePlayerMass();
   }
   for (const remoteLoad of Coop.bridgeLoads(bridge.floor)) {
     imbalance += remoteLoad.x * remoteLoad.mass;
@@ -1926,7 +2485,9 @@ function updateBridgePhysics(bridge, dt, isActive) {
   const massAmp = Math.min(0.34, stats.loadSpan * 0.018 + Math.abs(stats.imbalance) * 0.012);
   const wobbleAmp = bridge.type === 'rocking' ? 0.08 + massAmp : 0;
   const wobbleTarget = Math.sin(bridge.wobbleT * bridge.wobbleFreq) * wobbleAmp;
-  const torque = imbalance * K_GRAV - (bridge.tilt - wobbleTarget) * K_SPRING - bridge.tiltVel * C_DAMP;
+  const spring = Math.max(1.4, K_SPRING + runModAdd('springAdd'));
+  const damp = Math.max(0.55, C_DAMP + runModAdd('dampAdd'));
+  const torque = imbalance * K_GRAV - (bridge.tilt - wobbleTarget) * spring - bridge.tiltVel * damp;
   bridge.tiltVel += torque * dt;
   bridge.tilt += bridge.tiltVel * dt;
   bridge.group.position.y = bridge.baseY;
@@ -1975,7 +2536,7 @@ function updateBridgeHazards(bridge, dt, moveIntent) {
       bridge.bird.position.x = -6 + Math.min(1, Math.max(0, bridge.idleT - 2.0)) * 6;
       bridge.bird.position.z = state.playerZ;
     }
-    if (bridge.idleT > 3.0) {
+    if (bridge.idleT > 3.0 + runModAdd('birdPatienceAdd') + earlyMercyForFloor() * 0.8) {
       state.playerX = bridgeWorldXFromLocal(bridge, state.playerX);
       state.onBridge = false;
       state.playerVX = 0;
@@ -2028,6 +2589,8 @@ function update(dt) {
     updateBridgePhysics(bridge, dt, bridge === currentBridge);
   }
   state.tilt = currentBridge.tilt;
+  currentBridge.maxAbsTilt = Math.max(currentBridge.maxAbsTilt || 0, Math.abs(state.tilt));
+  state.bridgeMaxTilt = currentBridge.maxAbsTilt;
 
   // Refresh cables to follow each bridge
   for (const cb of cables) {
@@ -2049,13 +2612,14 @@ function update(dt) {
 
   if (state.onBridge && !state.jumping && (state.phase === 'choose' || state.phase === 'jump')) {
     // Walking velocity is a CONSTANT in world space — same in every phase.
-    let { vx: walkVx, vz: walkVz } = localMoveVelocity(forward, strafe, WALK_SPEED);
+    let { vx: walkVx, vz: walkVz } = localMoveVelocity(forward, strafe, WALK_SPEED * runModMul('walkSpeedMul'));
 
     // Slope drift along X (the slope axis). Static friction first.
     const gSin = 9.8 * Math.sin(state.tilt);
     const gCos = 9.8 * Math.cos(state.tilt);
     const onIce = currentBridge.iceBand && state.playerZ >= currentBridge.iceBand.zMin && state.playerZ <= currentBridge.iceBand.zMax;
-    const grip = (onIce ? 0 : STATIC_MU) * gCos;
+    const iceHasGrip = onIce && runModFlag('iceUphill');
+    const grip = ((onIce && !iceHasGrip) ? 0 : STATIC_MU * runModMul('gripMul') + earlyMercyForFloor() * 0.06) * gCos;
     if (Math.abs(gSin) > grip) {
       const excess = (Math.abs(gSin) - grip) * Math.sign(gSin);
       state.slideVX += excess * dt;
@@ -2065,7 +2629,7 @@ function update(dt) {
     }
 
     const downhillDir = Math.sign(gSin);
-    if (onIce && downhillDir && walkVx * downhillDir < 0) {
+    if (onIce && !runModFlag('iceUphill') && downhillDir && walkVx * downhillDir < 0) {
       walkVx = 0;
     }
     const uphillInput = downhillDir ? Math.max(0, -walkVx * downhillDir) : 0;
@@ -2082,7 +2646,7 @@ function update(dt) {
       const windOn = Math.floor(currentBridge.windT / 5) % 2 === 0;
       if (windOn) {
         if (walkVz * currentBridge.windDir < 0) walkVz *= 0.45;
-        walkVz += currentBridge.windDir * 1.85;
+        walkVz += currentBridge.windDir * 1.85 * runModMul('windPushMul') * (1 - earlyMercyForFloor() * 0.22);
       }
     }
 
@@ -2132,7 +2696,7 @@ function update(dt) {
       if (state.phase === 'choose' || state.phase === 'jump') {
         fail(state.amplify ? 'Снёс правильный — мост перевесило' : 'Перевесило');
       }
-    } else if (Math.abs(state.tilt) > FAIL_TILT) {
+    } else if (Math.abs(state.tilt) > effectiveFailTilt()) {
       state.playerX = bridgeWorldXFromLocal(activeBridge(), state.playerX);
       state.onBridge = false;
       state.playerVY = 0;
@@ -2297,7 +2861,7 @@ function update(dt) {
   camera.lookAt(px, py + 0.4, pz);
 
   // === HUD meters ===
-  const tiltPct = THREE.MathUtils.clamp(state.tilt / FAIL_TILT, -1, 1);
+  const tiltPct = THREE.MathUtils.clamp(state.tilt / effectiveFailTilt(), -1, 1);
   tiltNeedle.style.left = (50 + tiltPct * 50) + '%';
   const danger = Math.abs(tiltPct);
   tiltNeedle.style.background = `rgb(${244 + (255 - 244) * danger},${185 - 100 * danger},${66 - 60 * danger})`;
@@ -2309,11 +2873,18 @@ function update(dt) {
     const myY = lowerSurfaceYAt(state.playerX, state.playerZ) + PLAYER_HEIGHT;
     const gap = upY - myY;
     const launchLift = lowerSurfaceYAt(state.playerX, state.playerZ) - (activeBridge().baseY + 0.15);
-    const lift01 = THREE.MathUtils.clamp(launchLift / MIN_LAUNCH_LIFT, 0, 1);
-    const edge01 = THREE.MathUtils.clamp((Math.abs(state.playerX) - 0.6) / (MIN_LAUNCH_EDGE_X - 0.6), 0, 1);
+    const lift01 = THREE.MathUtils.clamp(launchLift / effectiveLaunchLift(), 0, 1);
+    const edge01 = THREE.MathUtils.clamp((Math.abs(state.playerX) - 0.6) / (effectiveLaunchEdgeX() - 0.6), 0, 1);
     // Normalised: 0 = not ready; 1 = bridge is close and the current bridge has lifted the player enough.
     const reach01 = THREE.MathUtils.clamp(1 - (gap - 1.5) / 4.5, 0, 1) * lift01 * edge01;
     phaseNeedle.style.left = (reach01 * 100) + '%';
+    if (state.phase === 'jump' && reach01 > 0.84 && !state.spacePromptReady) {
+      state.spacePromptReady = true;
+      setCoach(touchInputPreferred() ? 'Жми «Прыг»!' : 'Жми ПРОБЕЛ!', 'good');
+    } else if (state.phase === 'jump' && reach01 < 0.45 && state.spacePromptReady) {
+      state.spacePromptReady = false;
+      setCoach('');
+    }
   } else {
     phaseNeedle.style.left = '100%';
   }
@@ -2360,6 +2931,7 @@ $('start').addEventListener('click', async e => {
   try {
     await prepareQuizForStart();
     Sound && Sound.set && Sound.set(true);
+    if (ovRestart) ovRestart.textContent = 'Заново';
     boot.hidden = true;
     started = true;
     startRound();
@@ -2379,8 +2951,13 @@ $('ov-restart').addEventListener('click', e => {
     showRendererError();
     return;
   }
-  state.score = 0; state.round = 1; state.streak = 0;
-  startRound();
+  const resumeCheckpoint = state.restartMode === 'checkpoint' && state.checkpointFloor > 1;
+  const fromFloor = resumeCheckpoint ? state.checkpointFloor : 1;
+  state.score = resumeCheckpoint ? state.checkpointScore : 0;
+  state.round = fromFloor;
+  state.streak = resumeCheckpoint ? state.checkpointStreak : 0;
+  if (ovRestart) ovRestart.textContent = 'Заново';
+  startRound({ fromFloor, resumeCheckpoint });
 });
 
 window.MOSTY_GAME_READY = true;

@@ -38,6 +38,12 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 .overlay .card { background: #15192a; border: 1px solid var(--line); padding: 24px 28px; border-radius: 14px; min-width: 280px; max-width: 420px; text-align: center; }
 .overlay h2 { margin: 0 0 8px; font-size: 28px; }
 .overlay p { margin: 0 0 18px; color: var(--muted); }
+.overlay-extra { margin: 0 0 18px; }
+.perk-choice-grid { display: grid; gap: 10px; text-align: left; }
+.perk-card { width: 100%; display: grid; gap: 5px; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.perk-card:hover { border-color: rgba(247,200,90,0.55); background: rgba(247,200,90,0.1); }
+.perk-name { font-weight: 900; color: #f7c85a; }
+.perk-desc { color: #c9c2b8; font-size: 12px; line-height: 1.35; }
 .primary { background: var(--acc); color: #1a1304; border: 0; padding: 11px 18px; border-radius: 8px; font-weight: 850; cursor: pointer; font-size: 15px; letter-spacing: 0; transition: transform 0.14s ease, filter 0.14s ease, box-shadow 0.14s ease; }
 .primary:hover { filter: brightness(1.06); box-shadow: 0 10px 26px rgba(244, 185, 66, 0.18); }
 .primary:active { transform: translateY(1px); }
@@ -87,6 +93,23 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 .coop-status.warn { color: #f7c85a; }
 .coop-badge { position: fixed; top: calc(84px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 6; display: none; max-width: min(330px, 86vw); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(143,216,198,0.26); background: rgba(6, 12, 14, 0.72); color: #c9f8ed; font-size: 12px; font-weight: 760; backdrop-filter: blur(8px); }
 .coop-badge.on { display: block; }
+.meta-panel { grid-column: 2; width: 100%; display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.meta-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.meta-kicker { color: #8fd8c6; font-size: 11px; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; }
+.meta-title { color: var(--text); font-weight: 900; font-size: 18px; margin-top: 2px; }
+.meta-bank { color: #f7c85a; font-weight: 900; padding: 6px 9px; border-radius: 999px; background: rgba(247,200,90,0.1); border: 1px solid rgba(247,200,90,0.22); white-space: nowrap; }
+.shop-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.shop-card { min-width: 0; display: grid; gap: 5px; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.065); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.shop-card:hover:not(:disabled) { border-color: rgba(247,200,90,0.45); background: rgba(247,200,90,0.09); }
+.shop-card:disabled { cursor: default; opacity: 0.58; }
+.shop-name { display: flex; justify-content: space-between; gap: 8px; font-weight: 880; font-size: 12px; }
+.shop-name b { color: #8fd8c6; font-weight: 900; }
+.shop-desc { color: #aeb8c7; font-size: 11px; line-height: 1.25; }
+.shop-cost { color: #f7c85a; font-size: 11px; font-weight: 900; }
+.run-build { color: #9da7b5; font-size: 12px; line-height: 1.35; }
+#coach { position: fixed; left: 50%; top: calc(86px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 7; max-width: min(520px, calc(100vw - 28px)); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.16); background: rgba(8, 13, 16, 0.72); color: #f1efe7; font-size: 15px; font-weight: 900; text-align: center; backdrop-filter: blur(8px); box-shadow: 0 12px 36px rgba(0,0,0,0.25); pointer-events: none; }
+#coach.good { color: #d9ffe7; border-color: rgba(92,229,138,0.34); background: rgba(21,62,36,0.74); }
+#coach.warn { color: #fff1c2; border-color: rgba(247,200,90,0.34); background: rgba(74,52,16,0.76); }
 .learning-menu.classic .learning-select, .learning-menu.classic .slot-grid { display: none; }
 .learning-menu.audio .slot-grid { display: none; }
 #audio-repeat { position: fixed; right: calc(16px + env(safe-area-inset-right)); top: calc(84px + env(safe-area-inset-top)); z-index: 6; display: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--acc); font-weight: 900; cursor: pointer; backdrop-filter: blur(6px); }
@@ -121,6 +144,10 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
   .boot p { font-size: 13px; max-width: none; }
   .boot #start { width: auto; min-width: 148px; margin-top: 0; justify-self: start; }
   .coop-panel { grid-column: auto; margin-top: 0; }
+  .meta-panel { grid-column: auto; gap: 10px; padding-top: 12px; }
+  .meta-title { font-size: 16px; }
+  .shop-grid { grid-template-columns: 1fr; }
+  #coach { top: calc(104px + env(safe-area-inset-top)); font-size: 13px; padding: 8px 10px; }
   .coop-row { grid-template-columns: minmax(0, 1fr) minmax(72px, auto) minmax(72px, auto); }
   .coop-row button { width: auto; min-width: 72px; padding: 0 10px; }
   .learning-menu { grid-column: auto; grid-row: auto; gap: 14px; }
