@@ -1068,6 +1068,187 @@ function makeMushroom(text, n) {
   return g;
 }
 
+// -------- Tutorial sprites in 3D --------
+function makeTutorialBannerTexture(text, accent = '#f4b942') {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(15, 20, 28, 0.94)';
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 32); ctx.fill();
+  ctx.strokeStyle = accent; ctx.lineWidth = 8;
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 32); ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const fontFamily = 'ui-sans-serif, system-ui, sans-serif';
+  const maxWidth = c.width - 80;
+  let size = 92;
+  let lines = [];
+  while (size >= 32) {
+    ctx.font = `bold ${size}px ${fontFamily}`;
+    lines = wrapLabelText(ctx, text, maxWidth, 2);
+    if (lines.length <= 2 && lines.every(line => ctx.measureText(line).width <= maxWidth)) break;
+    size -= 6;
+  }
+  if (!lines.length) lines = [String(text || '')];
+  ctx.font = `bold ${size}px ${fontFamily}`;
+  const lh = size * 1.18;
+  const startY = c.height / 2 - (lines.length - 1) * lh / 2;
+  lines.forEach((line, i) => ctx.fillText(line, c.width / 2, startY + i * lh));
+  return new THREE.CanvasTexture(c);
+}
+
+function makeArrowTexture(direction, color) {
+  // direction: 'down' or 'up'. Returns a tall canvas with shaft + arrowhead.
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#0a0a0a';
+  ctx.lineWidth = 6;
+  ctx.lineJoin = 'round';
+  const headStart = direction === 'down' ? 150 : 106;
+  const tipY = direction === 'down' ? 250 : 6;
+  const shaftTop = direction === 'down' ? 6 : 250;
+  const shaftBot = direction === 'down' ? 170 : 86;
+  ctx.beginPath();
+  ctx.moveTo(50, shaftTop);
+  ctx.lineTo(78, shaftTop);
+  ctx.lineTo(78, shaftBot);
+  ctx.lineTo(50, shaftBot);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(15, headStart);
+  ctx.lineTo(113, headStart);
+  ctx.lineTo(64, tipY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  return new THREE.CanvasTexture(c);
+}
+
+function makeTutorialArrowSprite(color) {
+  const tex = makeArrowTexture('down', color);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true }));
+  sprite.scale.set(0.85, 1.55, 1);
+  sprite.renderOrder = 1090;
+  return sprite;
+}
+
+function makeTutorialChip(text, color) {
+  const tex = makeTutorialBannerTexture(text, color);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true }));
+  sprite.scale.set(1.7, 0.55, 1);
+  sprite.renderOrder = 1095;
+  return sprite;
+}
+
+function makeTutorialBanner(text) {
+  const tex = makeTutorialBannerTexture(text, '#f4b942');
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true }));
+  sprite.scale.set(7.0, 1.75, 1);
+  sprite.renderOrder = 1100;
+  return sprite;
+}
+
+function makeTutorialUpArrow() {
+  const tex = makeArrowTexture('up', '#5ce58a');
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true }));
+  sprite.scale.set(1.1, 2.0, 1);
+  sprite.renderOrder = 1100;
+  return sprite;
+}
+
+const TUTORIAL_BANNER_TEXTS = {
+  1: 'СНИМИ НЕВЕРНЫЙ',
+  2: 'СНИМИ 3 НЕВЕРНЫХ',
+  3: 'ОЧИСТИ И ПРЫГАЙ',
+};
+
+function decorateTutorialBridge(bridge) {
+  if (!bridge.tutorialStep) return;
+
+  const banner = makeTutorialBanner(TUTORIAL_BANNER_TEXTS[bridge.tutorialStep] || 'ОБУЧЕНИЕ');
+  banner.position.set(0, 4.6, 0);
+  bridge.group.add(banner);
+  bridge.decor.push(banner);
+  bridge.tutorialBanner = banner;
+
+  for (const w of bridge.weights) {
+    const color = w.isCorrect ? '#5ce58a' : '#ff5c5c';
+    const arrow = makeTutorialArrowSprite(color);
+    arrow.position.set(w.slot, 3.0, w.zOff);
+    bridge.group.add(arrow);
+    bridge.decor.push(arrow);
+    w.tutorialArrow = arrow;
+
+    const chip = makeTutorialChip(w.isCorrect ? 'ОСТАВЬ' : 'СНИМИ', color);
+    chip.position.set(w.slot, 3.85, w.zOff);
+    bridge.group.add(chip);
+    bridge.decor.push(chip);
+    w.tutorialChip = chip;
+  }
+  bridge.tutorialT = 0;
+  bridge.tutorialJumpArrow = null;
+  bridge.tutorialJumpChip = null;
+}
+
+function ensureTutorialJumpArrow(bridge) {
+  if (!bridge.tutorialStep || bridge.tutorialJumpArrow) return;
+  if (!bridgeReadyToJump(bridge)) return;
+
+  let sign;
+  if (bridge.tutorialStep === 1) {
+    sign = 1;
+  } else {
+    const correct = bridge.weights.find(w => w.isCorrect && !w.removed);
+    sign = -Math.sign(correct?.slot || 1) || 1;
+  }
+
+  const arrow = makeTutorialUpArrow();
+  arrow.position.set(sign * 4.5, 3.4, 0);
+  bridge.group.add(arrow);
+  bridge.decor.push(arrow);
+  bridge.tutorialJumpArrow = arrow;
+
+  const chip = makeTutorialChip('ПРОБЕЛ', '#5ce58a');
+  chip.scale.set(2.2, 0.72, 1);
+  chip.position.set(sign * 4.5, 5.2, 0);
+  bridge.group.add(chip);
+  bridge.decor.push(chip);
+  bridge.tutorialJumpChip = chip;
+}
+
+function updateTutorialMarkers(bridge, dt) {
+  if (!bridge.tutorialStep) return;
+  bridge.tutorialT = (bridge.tutorialT || 0) + dt;
+  const bob = Math.sin(bridge.tutorialT * 3.4) * 0.18;
+  const pulse = 0.85 + 0.15 * Math.sin(bridge.tutorialT * 4.5);
+  for (const w of bridge.weights) {
+    if (!w.tutorialArrow) continue;
+    if (w.removed) {
+      w.tutorialArrow.visible = false;
+      if (w.tutorialChip) w.tutorialChip.visible = false;
+      continue;
+    }
+    w.tutorialArrow.position.y = 3.0 + bob;
+    if (w.tutorialChip) w.tutorialChip.material.opacity = pulse;
+  }
+  if (bridge.tutorialBanner) {
+    bridge.tutorialBanner.material.opacity = 0.95;
+  }
+  if (bridge === activeBridge() && state.phase === 'jump') {
+    ensureTutorialJumpArrow(bridge);
+  }
+  if (bridge.tutorialJumpArrow) {
+    bridge.tutorialJumpArrow.position.y = 3.4 + bob * 1.3;
+    bridge.tutorialJumpArrow.material.opacity = pulse;
+    if (bridge.tutorialJumpChip) bridge.tutorialJumpChip.material.opacity = pulse;
+  }
+}
+
 // -------- Player --------
 const player = new THREE.Group();
 const playerBody = new THREE.Mesh(
@@ -1521,6 +1702,9 @@ const zoneMaterials = {
 function clearBridgeDecor(bridge) {
   for (const item of bridge.decor) bridge.group.remove(item);
   bridge.decor = [];
+  bridge.tutorialBanner = null;
+  bridge.tutorialJumpArrow = null;
+  bridge.tutorialJumpChip = null;
   const parts = bridge.group.userData;
   for (const part of [...parts.rails, ...parts.posts, ...parts.sideBoards, ...parts.bars]) {
     part.visible = true;
@@ -1931,6 +2115,7 @@ function setupBridgeQuestion(bridge) {
     .filter(w => !w.isCorrect)
     .sort((a, b) => (a.mass || 1) - (b.mass || 1))
     .map(w => w.idx);
+  decorateTutorialBridge(bridge);
   if (!coopConfig) Coop?.publishBridgeConfig?.(bridge);
 }
 
@@ -2841,6 +3026,7 @@ function update(dt) {
   }
 
   for (const bridge of bridges) updateBridgeHazards(bridge, dt, moveIntent);
+  for (const bridge of bridges) updateTutorialMarkers(bridge, dt);
 
   // === Slide-off / fail conditions ===
   if (state.onBridge && !state.jumping) {
