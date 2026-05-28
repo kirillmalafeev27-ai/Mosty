@@ -192,7 +192,7 @@ const PERKS = [
   {
     id: 'antimagnet',
     name: 'Антимагнит',
-    desc: 'Если случайно снял правильный гриб, оставшиеся тянут не так яростно.',
+    desc: 'Спасает один раз: если снимешь правильный гриб — даёт прыгнуть на следующий мост. После моста реликвия уходит.',
     mods: { amplifyWeightMul: 0.62 },
   },
   {
@@ -2342,7 +2342,12 @@ function removeWeight(w) {
     if (w.isCorrect) {
       bridge.mistakes = (bridge.mistakes || 0) + 1;
       state.bridgeMistakes = bridge.mistakes;
-      if (!bridge.tutorialNoAmplify) {
+      const hasAntimagnet = (state.perks || []).includes('antimagnet');
+      if (hasAntimagnet && !bridge.antimagnetRescue) {
+        bridge.antimagnetRescue = true;
+        setHint('Антимагнит сработал! Сними оставшиеся неверные и прыгай. Реликвия уйдёт после моста.');
+        setCoach('Антимагнит спасает', 'warn');
+      } else if (!bridge.tutorialNoAmplify) {
         bridge.amplify = true;
         state.amplify = true;
         setHint('Это был правильный ответ! Оставшиеся тянут сильнее…');
@@ -2371,7 +2376,11 @@ function bridgeReadyToJump(bridge) {
     w.isCorrect || w.removed || (w.anchor && w.checked)
   );
   const correctLeft = bridge.weights.some(w => w.isCorrect && !w.removed);
-  return wrongsHandled && correctLeft;
+  if (wrongsHandled && correctLeft) return true;
+  // Antimagnet rescue: lets the player jump even though the correct mushroom
+  // is gone. The perk is consumed once they actually land on the next bridge.
+  if (bridge.antimagnetRescue && wrongsHandled) return true;
+  return false;
 }
 
 // -------- Input --------
@@ -2588,8 +2597,9 @@ function tryJump() {
   const playerWorldY = launchSurfaceY + PLAYER_HEIGHT;
   const gap = upperY - playerWorldY;
   const launchLift = launchSurfaceY - (launchBridge.baseY + 0.15);
-  const raisedEdgeLaunch = Math.abs(state.playerX) >= effectiveLaunchEdgeX() && launchLift >= effectiveLaunchLift();
-  const jumpReach = effectiveJumpReach(launchBridge);
+  const raisedEdgeLaunch = launchBridge.antimagnetRescue
+    || (Math.abs(state.playerX) >= effectiveLaunchEdgeX() && launchLift >= effectiveLaunchLift());
+  const jumpReach = effectiveJumpReach(launchBridge) + (launchBridge.antimagnetRescue ? 1.6 : 0);
   const reachable = raisedEdgeLaunch && gap > 0 && gap < jumpReach;
   state.jumping = true;
   state.jumpMode = 'upper';
@@ -2835,6 +2845,11 @@ function landOnNextBridge(landingLocalX) {
   }
 
   awardBridge(clearedBridge);
+  if (clearedBridge.antimagnetRescue) {
+    state.perks = (state.perks || []).filter(p => p !== 'antimagnet');
+    setCoach('Антимагнит израсходован', 'warn');
+    updateMetaUi();
+  }
   targetBridge.lockedX = targetBridge.group.position.x;
   if (targetBridge.missingSections?.length) {
     targetBridge.tilt = THREE.MathUtils.clamp(targetBridge.tilt, -0.18, 0.18);
