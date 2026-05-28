@@ -982,31 +982,33 @@ const floorMarkers = [];
 
 // -------- Mushroom answer weights --------
 function labelTexture(text) {
-  // Plate grows to fit the text instead of cropping with ellipsis. Width is
-  // fixed; height (and therefore sprite aspect) adapts to line count + font.
+  // Standard plate is 1024x512 with the original font scale. Only the plate's
+  // HEIGHT grows when text truly can't fit otherwise — no ellipsis.
   const c = document.createElement('canvas');
   c.width = 1024;
+  c.height = 512;
   const ctx = c.getContext('2d');
   const fontFamily = 'ui-sans-serif, system-ui, sans-serif';
-  const horizontalPad = 56;
-  const maxTextWidth = c.width - horizontalPad * 2;
+  const maxTextWidth = c.width - 96;
 
   let size = 82;
   let lines = [String(text || '')];
-  while (size >= 40) {
+  while (size >= 34) {
     ctx.font = `bold ${size}px ${fontFamily}`;
     lines = naturalWrapLines(ctx, text, maxTextWidth);
-    if (lines.length <= 4) break;
+    if (lines.length <= 3) break;
     size -= 4;
   }
 
-  const lineHeight = size * 1.18;
-  const verticalPad = 60;
-  const minHeight = 340;
-  c.height = Math.max(minHeight, Math.ceil(lines.length * lineHeight + verticalPad * 2));
+  const lineHeight = size * 1.12;
+  const verticalPad = 56;
+  const requiredHeight = lines.length * lineHeight + verticalPad * 2;
+  if (requiredHeight > c.height) {
+    c.height = Math.ceil(requiredHeight);
+  }
 
-  // Setting canvas.height clears state — re-apply everything.
-  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  // Setting canvas.width/height clears state — re-apply everything.
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
   roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.fill();
   ctx.strokeStyle = '#f4b942';
   ctx.lineWidth = 4;
@@ -1133,8 +1135,9 @@ function makeMushroom(text, n) {
   const labelWidth = 3.18;
   const labelHeight = labelWidth / aspect;
   sprite.scale.set(labelWidth, labelHeight, 1);
-  // Anchor the plate's bottom edge a little above the mushroom cap (~y=0.7).
-  sprite.position.y = 1.0 + labelHeight / 2;
+  // Anchor by the plate center: standard plate (aspect 2) sits at y=1.7 like
+  // before; a grown plate lifts up to keep its bottom clear of the mushroom.
+  sprite.position.y = Math.max(1.7, 0.9 + labelHeight / 2);
   sprite.renderOrder = 999;
   g.add(sprite);
   return g;
