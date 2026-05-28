@@ -69,7 +69,6 @@ const BRIDGE_TYPES = [
   'sequence',
   'anti',
   'memory',
-  'pairs',
   'bird',
   'rockfall',
 ];
@@ -79,7 +78,6 @@ const QUESTION_BRIDGE_TYPES = new Set([
   'sequence',
   'anti',
   'memory',
-  'pairs',
 ]);
 
 const MOVING_JUMP_BRIDGE_TYPES = new Set([
@@ -103,7 +101,6 @@ const BRIDGE_TYPE_LABELS = {
   sequence: 'цепочка',
   anti: 'анти-вопрос',
   memory: 'вопрос исчезнет',
-  pairs: 'парные грибы',
   bird: 'пикирующая птица',
   rockfall: 'камнепад',
   tutWalk: 'обучение: сними неверный',
@@ -115,8 +112,8 @@ const TUTORIAL_SCRIPT = ['tutWalk', 'tutBalance', 'tutJump'];
 const TUTORIAL_BRIDGE_TYPES = new Set(TUTORIAL_SCRIPT);
 const EARLY_BRIDGE_SCRIPT = ['plain', 'rocking', 'plain', 'rocking', 'biased'];
 const TIER_EASY = ['plain', 'biased', 'rocking'];
-const TIER_MID = ['plain', 'biased', 'rocking', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne'];
-const TIER_HARD = ['plain', 'rocking', 'biased', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne', 'memory', 'anti', 'sequence', 'anchor', 'bird', 'narrow', 'rockfall', 'missingTwoPairs'];
+const TIER_MID = ['plain', 'biased', 'rocking', 'variedMass', 'ice', 'wind', 'multiCorrect', 'missingOne'];
+const TIER_HARD = ['plain', 'rocking', 'biased', 'variedMass', 'ice', 'wind', 'multiCorrect', 'missingOne', 'memory', 'anti', 'sequence', 'anchor', 'bird', 'narrow', 'rockfall', 'missingTwoPairs'];
 const CHECKPOINT_INTERVAL = 3;
 const PERK_OFFER_FLOORS = new Set([2, 4, 7, 10, 13, 16, 20, 24, 28]);
 const PROFILE_KEY = 'mosty.roguelike.profile.v1';
@@ -880,7 +877,7 @@ function ensureBridge(floor) {
 
 // Sequence and pairs bridges build their question locally; everything else
 // (including multiCorrect/anti/memory) pulls one item from the AI pool.
-const SELF_CONTAINED_BRIDGE_TYPES = new Set(['sequence', 'pairs', 'tutWalk', 'tutBalance', 'tutJump']);
+const SELF_CONTAINED_BRIDGE_TYPES = new Set(['sequence', 'tutWalk', 'tutBalance', 'tutJump']);
 function bridgeUsesAiPool(bridge) {
   if (typeof window.quizPoolHasQuestion !== 'function') return false;
   return !SELF_CONTAINED_BRIDGE_TYPES.has(bridge.type);
@@ -1964,8 +1961,6 @@ function applyBridgeVariant(bridge, config = null) {
   } else if (bridge.type === 'memory') {
     bridge.mode = 'memory';
     bridge.memoryTimer = 4 * runModMul('memoryTimerMul');
-  } else if (bridge.type === 'pairs') {
-    bridge.mode = 'pairs';
   } else if (bridge.type === 'bird') {
     bridge.mode = 'bird';
     const bird = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 5), zoneMaterials.bird);
@@ -2030,21 +2025,6 @@ function makeQuestionForBridge(bridge) {
       correctIndex: -1,
       sequence: numbers.map(String),
       correctSet: new Set(choices.map((_, i) => i)),
-    };
-  }
-
-  if (bridge.type === 'pairs') {
-    const choices = shuffle([
-      { text: 'Франция - Париж', correct: true },
-      { text: 'Япония - Токио', correct: true },
-      { text: 'Бразилия - Мадрид', correct: false },
-      { text: 'Египет - Берлин', correct: false },
-    ]);
-    return {
-      q: 'Пары: сними неподходящие страна-столица.',
-      choices: choices.map(item => item.text),
-      correctIndex: choices.findIndex(item => item.correct),
-      correctSet: new Set(choices.map((item, i) => item.correct ? i : -1).filter(i => i >= 0)),
     };
   }
 
@@ -2908,6 +2888,14 @@ function landOnNextBridge(landingLocalX) {
   }
   const safeLandingX = safeDeckXNear(targetBridge, landingLocalX, state.playerZ);
   state.playerX = THREE.MathUtils.clamp(safeLandingX, -LOWER_LEN / 2 + 0.25, LOWER_LEN / 2 - 0.25);
+  // On bridges with a missing deck section the mushrooms sit right where the
+  // natural landing X would put the player — push them to the back-rail strip
+  // and re-center on the middle so they can't accidentally pick a mushroom on
+  // landing. The mushrooms here are all on z≈0.
+  if (targetBridge.missingSections?.length) {
+    state.playerZ = LOWER_WID / 2 - 0.4;
+    state.playerX = safeDeckXNear(targetBridge, 0, state.playerZ);
+  }
   state.round += 1;
   state.phase = 'choose';
   state.onBridge = true;
