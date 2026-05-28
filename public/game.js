@@ -985,35 +985,82 @@ const floorMarkers = [];
 
 // -------- Mushroom answer weights --------
 function labelTexture(text) {
+  // Plate grows to fit the text instead of cropping with ellipsis. Width is
+  // fixed; height (and therefore sprite aspect) adapts to line count + font.
   const c = document.createElement('canvas');
-  c.width = 1024; c.height = 512;
+  c.width = 1024;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(0,0,0,0.72)';
-  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.fill();
-  ctx.strokeStyle = '#f4b942'; ctx.lineWidth = 4;
-  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.stroke();
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const maxWidth = c.width - 96;
   const fontFamily = 'ui-sans-serif, system-ui, sans-serif';
+  const horizontalPad = 56;
+  const maxTextWidth = c.width - horizontalPad * 2;
+
   let size = 82;
-  let lines = [];
-  while (size >= 34) {
+  let lines = [String(text || '')];
+  while (size >= 40) {
     ctx.font = `bold ${size}px ${fontFamily}`;
-    lines = wrapLabelText(ctx, text, maxWidth, 3);
-    if (lines.length <= 3 && lines.every(line => ctx.measureText(line).width <= maxWidth)) break;
-    ctx.font = `bold ${size}px ui-sans-serif, system-ui, sans-serif`;
+    lines = naturalWrapLines(ctx, text, maxTextWidth);
+    if (lines.length <= 4) break;
     size -= 4;
   }
 
-  if (!lines.length) lines = [String(text || '')];
+  const lineHeight = size * 1.18;
+  const verticalPad = 60;
+  const minHeight = 340;
+  c.height = Math.max(minHeight, Math.ceil(lines.length * lineHeight + verticalPad * 2));
+
+  // Setting canvas.height clears state — re-apply everything.
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.fill();
+  ctx.strokeStyle = '#f4b942';
+  ctx.lineWidth = 4;
+  roundRect(ctx, 10, 10, c.width - 20, c.height - 20, 34); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.font = `bold ${size}px ${fontFamily}`;
-  const lineHeight = size * 1.12;
+
   const startY = c.height / 2 - (lines.length - 1) * lineHeight / 2;
   lines.forEach((line, i) => {
     ctx.fillText(line, c.width / 2, startY + i * lineHeight);
   });
-  return new THREE.CanvasTexture(c);
+
+  return {
+    texture: new THREE.CanvasTexture(c),
+    aspect: c.width / c.height,
+  };
+}
+
+function naturalWrapLines(ctx, text, maxWidth) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [''];
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      line = candidate;
+      continue;
+    }
+    if (line) lines.push(line);
+    if (ctx.measureText(word).width > maxWidth) {
+      // Single word longer than the plate — hard-break by characters.
+      let chunk = '';
+      for (const ch of word) {
+        const next = chunk + ch;
+        if (ctx.measureText(next).width > maxWidth) {
+          if (chunk) lines.push(chunk);
+          chunk = ch;
+        } else {
+          chunk = next;
+        }
+      }
+      line = chunk;
+    } else {
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 function wrapLabelText(ctx, text, maxWidth, maxLines) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean);
@@ -1084,10 +1131,13 @@ function makeMushroom(text, n) {
   star.position.set(0, 0.78, 0.66);
   star.rotation.x = -0.3;
   g.add(star);
-  const tex = labelTexture(`${n}. ${text}`);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false }));
-  sprite.position.y = 1.7;
-  sprite.scale.set(3.18, 1.62, 1);
+  const { texture, aspect } = labelTexture(`${n}. ${text}`);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false }));
+  const labelWidth = 3.18;
+  const labelHeight = labelWidth / aspect;
+  sprite.scale.set(labelWidth, labelHeight, 1);
+  // Anchor the plate's bottom edge a little above the mushroom cap (~y=0.7).
+  sprite.position.y = 1.0 + labelHeight / 2;
   sprite.renderOrder = 999;
   g.add(sprite);
   return g;
