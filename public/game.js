@@ -113,8 +113,8 @@ const BRIDGE_TYPE_LABELS = {
 
 const TUTORIAL_SCRIPT = ['tutWalk', 'tutBalance', 'tutJump'];
 const TUTORIAL_BRIDGE_TYPES = new Set(TUTORIAL_SCRIPT);
-const EARLY_BRIDGE_SCRIPT = ['plain', 'rocking', 'plain', 'variedMass', 'biased'];
-const TIER_EASY = ['plain', 'biased', 'rocking', 'variedMass'];
+const EARLY_BRIDGE_SCRIPT = ['plain', 'rocking', 'plain', 'rocking', 'biased'];
+const TIER_EASY = ['plain', 'biased', 'rocking'];
 const TIER_MID = ['plain', 'biased', 'rocking', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne'];
 const TIER_HARD = ['plain', 'rocking', 'biased', 'variedMass', 'ice', 'wind', 'multiCorrect', 'pairs', 'missingOne', 'memory', 'anti', 'sequence', 'anchor', 'bird', 'narrow', 'rockfall', 'missingTwoPairs'];
 const CHECKPOINT_INTERVAL = 3;
