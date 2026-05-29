@@ -87,7 +87,8 @@
             var body = document.getElementById('ov-body');
             if (boot) boot.hidden = true;
             if (title) title.textContent = 'Игра не загрузилась';
-            if (body) body.textContent = 'Не загрузился 3D-модуль. Проверь, что на Render установились npm-зависимости и /vendor/three.module.js отдает 200.';
+            var detail = window.MOSTY_BOOT_ERROR ? ' Детали: ' + window.MOSTY_BOOT_ERROR : '';
+            if (body) body.textContent = 'Не загрузился 3D-модуль. Похоже, браузер слишком старый — обнови его до свежей версии (или попробуй Chrome/Edge/Brave/Firefox последней версии).' + detail;
             if (overlay) overlay.hidden = false;
           }, 0);
         });
