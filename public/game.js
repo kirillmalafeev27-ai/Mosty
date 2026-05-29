@@ -596,6 +596,12 @@ overlayExtra.addEventListener('click', event => {
   const perk = PERKS.find(item => item.id === button.dataset.perk);
   if (!perk) return;
   state.perks.push(perk.id);
+  // If the floor that offered this perk is also a checkpoint floor,
+  // the snapshot in landOnNextBridge was taken *before* the perk was
+  // picked — re-snapshot now so the perk survives a checkpoint resume.
+  if (isCheckpointFloor(state.round)) {
+    checkpointSnapshot();
+  }
   clearOverlayExtra();
   overlay.hidden = true;
   state.perkActive = false;
