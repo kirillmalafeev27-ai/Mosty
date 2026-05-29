@@ -386,6 +386,8 @@ const state = {
   runShards: 0,
   runRescues: 0,
   runSeed: 0,
+  shopActive: false,
+  shopResumePhase: null,
   runHistory: [],
   runStartedAt: 0,
   previousBestFloor: 1,
@@ -886,8 +888,8 @@ function bridgeUsesAiPool(bridge) {
 let aiPauseActive = false;
 function triggerAiPause(bridge) {
   if (aiPauseActive) return;
-  // Perk overlay is up — don't stomp it. Defer the AI work until the perk is chosen.
-  if (state.perkActive) {
+  // Perk overlay or shop is up — don't stomp it. Defer the AI work.
+  if (state.perkActive || state.shopActive) {
     bridge.pendingSetup = true;
     return;
   }
@@ -909,8 +911,8 @@ function triggerAiPause(bridge) {
         }
       }
       aiPauseActive = false;
-      // Perk overlay covers us — let the perk click handler resume phase.
-      if (state.perkActive) return;
+      // Perk overlay or shop covers us — let that close handler resume phase.
+      if (state.perkActive || state.shopActive) return;
       if (state.phase === 'paused') {
         state.phase = state.aiResumePhase || 'choose';
         syncQuestionHud();
@@ -1742,9 +1744,136 @@ function updateMetaUi() {
       : `Рекорд: мост ${profile.bestFloor || 1}. В каждом забеге есть 1 бесплатное спасение.`;
   }
   updateActivePerksUi();
+  updateShopButton();
+  if (state.shopActive) renderInGameShop();
 }
 
 initMetaUi();
+initInGameShop();
+
+function initInGameShop() {
+  if ($('shop-button')) return;
+  const btn = document.createElement('button');
+  btn.id = 'shop-button';
+  btn.className = 'shop-button';
+  btn.type = 'button';
+  btn.hidden = true;
+  btn.innerHTML = `
+    <span class="shop-button-label">Магазин</span>
+    <span class="shop-button-bank"><span id="shop-button-shards">0</span> оск.</span>
+  `;
+  document.body.appendChild(btn);
+
+  const ovl = document.createElement('div');
+  ovl.id = 'shop-overlay';
+  ovl.className = 'shop-overlay';
+  ovl.hidden = true;
+  ovl.innerHTML = `
+    <div class="shop-overlay-card">
+      <div class="meta-head">
+        <div>
+          <div class="meta-kicker">Магазин</div>
+          <div class="meta-title">Постоянные улучшения</div>
+        </div>
+        <div class="meta-bank"><span id="ingame-shop-shards">0</span> оск.</div>
+      </div>
+      <div id="ingame-shop-grid" class="shop-grid"></div>
+      <button type="button" class="primary shop-close" id="shop-close">Назад в забег</button>
+    </div>
+  `;
+  document.body.appendChild(ovl);
+
+  btn.addEventListener('click', (event) => {
+    event.currentTarget.blur();
+    openShop();
+  });
+  ovl.addEventListener('click', (event) => {
+    if (event.target === ovl) {
+      closeShop();
+      return;
+    }
+    const buy = event.target.closest('[data-buy-upgrade]');
+    if (buy) {
+      buyUpgrade(buy.dataset.buyUpgrade);
+    }
+  });
+  $('shop-close').addEventListener('click', (event) => {
+    event.currentTarget.blur();
+    closeShop();
+  });
+  addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.shopActive) {
+      closeShop();
+      event.preventDefault();
+    }
+  }, { capture: true });
+}
+
+function shopButtonAvailable() {
+  if (!started) return false;
+  if (state.shopActive) return true;
+  if (state.perkActive) return false;
+  if (aiPauseActive) return false;
+  if (state.phase === 'paused' || state.phase === 'over' || state.phase === 'win') return false;
+  return true;
+}
+
+function updateShopButton() {
+  const btn = $('shop-button');
+  if (!btn) return;
+  btn.hidden = !shopButtonAvailable() && !state.shopActive;
+  const bank = $('shop-button-shards');
+  if (bank) bank.textContent = profile.shards;
+}
+
+function renderInGameShop() {
+  const bank = $('ingame-shop-shards');
+  if (bank) bank.textContent = profile.shards;
+  const grid = $('ingame-shop-grid');
+  if (!grid) return;
+  grid.innerHTML = SHOP_UPGRADES.map(upgrade => {
+    const level = upgradeLevel(upgrade.id);
+    const cost = upgradeCost(upgrade);
+    const maxed = cost === null;
+    const disabled = maxed || profile.shards < cost;
+    return `
+      <button class="shop-card" type="button" data-buy-upgrade="${upgrade.id}" ${disabled ? 'disabled' : ''}>
+        <span class="shop-name">${escapeHtml(upgrade.name)} <b>${level}/${upgrade.max}</b></span>
+        <span class="shop-desc">${escapeHtml(upgrade.desc)}</span>
+        <span class="shop-cost">${maxed ? 'куплено' : `${cost} оск.`}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function openShop() {
+  if (!started) return;
+  if (state.shopActive) return;
+  if (state.perkActive) return;
+  if (state.phase === 'paused' || state.phase === 'over' || state.phase === 'win') return;
+  state.shopResumePhase = state.phase;
+  state.shopActive = true;
+  state.phase = 'paused';
+  renderInGameShop();
+  const ovl = $('shop-overlay');
+  if (ovl) ovl.hidden = false;
+  updateShopButton();
+}
+
+function closeShop() {
+  if (!state.shopActive) return;
+  state.shopActive = false;
+  const ovl = $('shop-overlay');
+  if (ovl) ovl.hidden = true;
+  if (state.phase === 'paused') {
+    state.phase = state.shopResumePhase || 'choose';
+  }
+  state.shopResumePhase = null;
+  updateShopButton();
+  // Any AI generation deferred while the shop was open — kick it now.
+  const pending = bridges.find(b => b.pendingSetup);
+  if (pending) triggerAiPause(pending);
+}
 
 // -------- Resize --------
 addEventListener('resize', () => {
