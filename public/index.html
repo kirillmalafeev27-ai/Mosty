@@ -69,28 +69,74 @@
   <script type="module" src="/game.js"></script>
   <script>
     (function () {
+      // --- capability probes ---
+      var supportsModule = 'noModule' in document.createElement('script');
+      var supportsWebGL = false;
+      try {
+        var probe = document.createElement('canvas');
+        supportsWebGL = !!(window.WebGLRenderingContext
+          && (probe.getContext('webgl2') || probe.getContext('webgl') || probe.getContext('experimental-webgl')));
+      } catch (e) { supportsWebGL = false; }
+      window.MOSTY_BOOT_CAPS = { module: supportsModule, webgl: supportsWebGL };
+
       window.addEventListener('error', function (event) {
         window.MOSTY_BOOT_ERROR = event && (event.message || String(event.error || ''));
       });
       window.addEventListener('unhandledrejection', function (event) {
         window.MOSTY_BOOT_ERROR = event && event.reason && (event.reason.message || String(event.reason));
       });
+
+      function showCompatError(title, message) {
+        var boot = document.getElementById('boot');
+        var overlay = document.getElementById('overlay');
+        var titleEl = document.getElementById('ov-title');
+        var bodyEl = document.getElementById('ov-body');
+        var restartBtn = document.getElementById('ov-restart');
+        if (boot) boot.hidden = true;
+        if (titleEl) titleEl.textContent = title;
+        if (bodyEl) bodyEl.innerHTML = message;
+        if (restartBtn) restartBtn.hidden = true;
+        if (overlay) overlay.hidden = false;
+      }
+
+      function suggestUpdate() {
+        return 'Обнови браузер до свежей версии или открой ссылку в <b>Chrome</b>, <b>Edge</b>, <b>Brave</b>, <b>Firefox</b> или <b>Safari 16+</b>.';
+      }
+
       document.addEventListener('DOMContentLoaded', function () {
+        // Backstop 1: ES modules not supported at all — game.js can't even run.
+        if (!supportsModule) {
+          showCompatError('Браузер слишком старый',
+            'Этот браузер не поддерживает ES-модули, поэтому игра не запустится. ' + suggestUpdate());
+          return;
+        }
+        // Backstop 2: WebGL missing — three.js can't render.
+        if (!supportsWebGL) {
+          showCompatError('Нет WebGL',
+            'Браузер не отдаёт WebGL-контекст. Включи аппаратное ускорение в настройках браузера/системы или обнови видеодрайвер.<br>' + suggestUpdate());
+          return;
+        }
+
         var start = document.getElementById('start');
         if (!start) return;
         start.addEventListener('click', function () {
+          // Backstop 3: click fired but game.js never ran (parse error / 404 on three).
           setTimeout(function () {
             if (window.MOSTY_GAME_READY) return;
-            var boot = document.getElementById('boot');
-            var overlay = document.getElementById('overlay');
-            var title = document.getElementById('ov-title');
-            var body = document.getElementById('ov-body');
-            if (boot) boot.hidden = true;
-            if (title) title.textContent = 'Игра не загрузилась';
-            var detail = window.MOSTY_BOOT_ERROR ? ' Детали: ' + window.MOSTY_BOOT_ERROR : '';
-            if (body) body.textContent = 'Не загрузился 3D-модуль. Похоже, браузер слишком старый — обнови его до свежей версии (или попробуй Chrome/Edge/Brave/Firefox последней версии).' + detail;
-            if (overlay) overlay.hidden = false;
+            var detail = window.MOSTY_BOOT_ERROR ? '<br><br><small>Детали: ' + window.MOSTY_BOOT_ERROR + '</small>' : '';
+            showCompatError('Игра не загрузилась',
+              'Не загрузился 3D-модуль. ' + suggestUpdate() + detail);
           }, 0);
+          // Backstop 4: module ran but the actual scene never came up (e.g. AI
+          // prefetch stalled, GL context lost, three.js choked on something).
+          setTimeout(function () {
+            if (document.getElementById('overlay') && !document.getElementById('overlay').hidden) return;
+            if (window.MOSTY_GAME_READY && !window.MOSTY_RUN_STARTED) {
+              var detail = window.MOSTY_BOOT_ERROR ? '<br><br><small>Детали: ' + window.MOSTY_BOOT_ERROR + '</small>' : '';
+              showCompatError('Сцена не запустилась',
+                '20 секунд прошло, а игра так и не стартовала. Это бывает на старых видеокартах или нестабильной сети. ' + suggestUpdate() + detail);
+            }
+          }, 20000);
         });
       });
     })();

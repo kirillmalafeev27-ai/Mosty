@@ -3466,6 +3466,7 @@ $('start').addEventListener('click', async e => {
     if (ovRestart) ovRestart.textContent = 'Заново';
     boot.hidden = true;
     started = true;
+    window.MOSTY_RUN_STARTED = true;
     startRound();
   } catch (error) {
     console.warn('Mosty quiz prepare failed:', error);
