@@ -2004,6 +2004,44 @@ function safeDeckXNear(bridge, x, z) {
   return candidates.sort((a, b) => Math.abs(a - clampedX) - Math.abs(b - clampedX))[0] ?? clampedX;
 }
 
+function nearestWeightDistance(bridge, x, z) {
+  let best = Infinity;
+  for (const w of bridge.weights) {
+    if (w.removed) continue;
+    const dx = x - w.slot;
+    const dz = z - w.zOff;
+    const d = Math.hypot(dx, dz);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function safeLandingXAwayFromWeights(bridge, preferredX, z) {
+  const safeMargin = PICK_RADIUS + 0.45;
+  // Skip the search entirely if the preferred X is already clear.
+  if (nearestWeightDistance(bridge, preferredX, z) >= safeMargin) return preferredX;
+
+  let bestX = preferredX;
+  let bestDist = nearestWeightDistance(bridge, preferredX, z);
+  let bestPenalty = Math.abs(0); // tie-break by nudge distance
+  // Sample X positions across the entire deck. The candidate with the largest
+  // clearance from any mushroom wins; ties broken by smallest nudge from the
+  // preferred X.
+  for (let tx = -LOWER_LEN / 2 + 0.4; tx <= LOWER_LEN / 2 - 0.4; tx += 0.2) {
+    const snapped = safeDeckXNear(bridge, tx, z);
+    const dist = nearestWeightDistance(bridge, snapped, z);
+    const penalty = Math.abs(snapped - preferredX);
+    const better = dist > bestDist + 0.001
+      || (Math.abs(dist - bestDist) < 0.001 && penalty < bestPenalty);
+    if (better) {
+      bestX = snapped;
+      bestDist = dist;
+      bestPenalty = penalty;
+    }
+  }
+  return bestX;
+}
+
 function missingBridgeSlots(bridge) {
   if (bridge.type === 'missingTwoPairs') return [-4.0, -0.45, 0.45, 4.0];
   const missingIndex = bridge.missingSectionIndices?.[0];
@@ -2820,14 +2858,15 @@ function resetToSafeSpot(reason) {
   state.jumping = false;
   state.jumpMode = 'none';
   state.launchSuccess = false;
-  state.playerX = safeDeckXNear(bridge, 0, 0);
-  state.playerZ = 0;
+  state.playerZ = bridge.missingSections?.length ? LOWER_WID / 2 - 0.4 : 0;
+  state.playerX = safeDeckXNear(bridge, 0, state.playerZ);
+  state.playerX = safeLandingXAwayFromWeights(bridge, state.playerX, state.playerZ);
   state.playerY = 0;
   state.playerVY = 0;
   state.playerVX = 0;
   state.playerVZ = 0;
   state.slideVX = 0;
-  state.pickupGrace = 0.6;
+  state.pickupGrace = 0.7;
   state.phase = bridgeReadyToJump(bridge) ? 'jump' : 'choose';
   bridge.tilt = THREE.MathUtils.clamp(bridge.tilt, -0.18, 0.18);
   bridge.tiltVel *= 0.15;
@@ -3034,6 +3073,14 @@ function landOnNextBridge(landingLocalX) {
     state.playerZ = LOWER_WID / 2 - 0.4;
     state.playerX = safeDeckXNear(targetBridge, 0, state.playerZ);
   }
+  // Slide the landing X to a spot that's at least PICK_RADIUS+0.45 from every
+  // mushroom. This avoids the ball brushing two mushrooms (including possibly
+  // the correct one) the instant they land.
+  state.playerX = safeLandingXAwayFromWeights(targetBridge, state.playerX, state.playerZ);
+  // Always grant a short pickup grace on landing so even a borderline overlap
+  // (or a quick reflex from the player) doesn't cost them a mushroom before
+  // they've looked around.
+  state.pickupGrace = Math.max(state.pickupGrace, 0.7);
   state.round += 1;
   state.phase = 'choose';
   state.onBridge = true;
